@@ -1,0 +1,21 @@
+{
+  "welcomeBack": "Welcome Back",
+  "createAccount": "Create Account",
+  "fullName": "Full Name",
+  "phoneNumber": "Phone Number",
+  "cin": "CIN",
+  "sexe": "Gender",
+  "male": "Male",
+  "female": "Female",
+  "birthDate": "Birth Date",
+  "username": "Username",
+  "password": "Password",
+  "loginBtn": "LOGIN",
+  "registerBtn": "REGISTER",
+  "newPatient": "New patient? Sign Up",
+  "alreadyHaveAccount": "Already have an account? Login",
+  "requiredField": "Required field",
+  "selectBirthDate": "Please select your birth date",
+  "accountCreated": "Account created! Please login.",
+  "authFailed": "Authentication Failed"
+}

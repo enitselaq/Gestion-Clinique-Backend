@@ -1,0 +1,21 @@
+{
+  "welcomeBack": "Bon retour",
+  "createAccount": "Créer un compte",
+  "fullName": "Nom complet",
+  "phoneNumber": "N° de téléphone",
+  "cin": "CIN",
+  "sexe": "Sexe",
+  "male": "Masculin",
+  "female": "Féminin",
+  "birthDate": "Date de naissance",
+  "username": "Nom d'utilisateur",
+  "password": "Mot de passe",
+  "loginBtn": "CONNEXION",
+  "registerBtn": "S'INSCRIRE",
+  "newPatient": "Nouveau patient ? S'inscrire",
+  "alreadyHaveAccount": "Déjà inscrit ? Connexion",
+  "requiredField": "Champ obligatoire",
+  "selectBirthDate": "Veuillez choisir votre date de naissance",
+  "accountCreated": "Compte créé ! Connectez-vous.",
+  "authFailed": "Échec de l'authentification"
+}

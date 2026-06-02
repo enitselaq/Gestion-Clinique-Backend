@@ -1,0 +1,20 @@
+# Local virtual environments
+venv/
+env/
+ENV/
+
+# Python bytecode (compiled files)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database (Since you use PostgreSQL, you don't need to upload local SQLite files)
+*.sqlite3
+
+# Environment variables (private keys/passwords)
+.env
+
+# IDE settings
+.vscode/
+.idea/

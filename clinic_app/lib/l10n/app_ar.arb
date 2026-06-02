@@ -1,0 +1,21 @@
+{
+  "welcomeBack": "مرحباً بك مجدداً",
+  "createAccount": "إنشاء حساب جديد",
+  "fullName": "الاسم الكامل",
+  "phoneNumber": "رقم الهاتف",
+  "cin": "بطاقة التعريف الوطنية",
+  "sexe": "الجنس",
+  "male": "ذكر",
+  "female": "أنثى",
+  "birthDate": "تاريخ الازدياد",
+  "username": "اسم المستخدم",
+  "password": "كلمة المرور",
+  "loginBtn": "تسجيل الدخول",
+  "registerBtn": "تسجيل",
+  "newPatient": "مريض جديد؟ إنشاء حساب",
+  "alreadyHaveAccount": "لديك حساب بالفعل؟ دخول",
+  "requiredField": "هذا الحقل مطلوب",
+  "selectBirthDate": "يرجى اختيار تاريخ ميلادك",
+  "accountCreated": "تم إنشاء الحساب بنجاح! يرجى تسجيل الدخول",
+  "authFailed": "فشل في عملية تسجيل الدخول"
+}
