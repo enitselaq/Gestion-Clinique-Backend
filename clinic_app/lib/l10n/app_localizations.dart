@@ -103,7 +103,7 @@ abstract class AppLocalizations {
   /// No description provided for @welcomeBack.
   ///
   /// In en, this message translates to:
-  /// **'Welcome Back'**
+  /// **'Sign in'**
   String get welcomeBack;
 
   /// No description provided for @createAccount.

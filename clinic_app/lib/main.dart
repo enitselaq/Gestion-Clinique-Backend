@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'core/app_theme.dart';
 import 'l10n/app_localizations.dart';
 import 'providers/auth_provider.dart';
 import 'providers/locale_provider.dart';
@@ -29,31 +30,26 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           title: 'Clinic Management',
           debugShowCheckedModeBanner: false,
-          
+
           locale: localeProvider.locale,
-          
+
           // Use the auto-generated list of locales from your ARB files
           supportedLocales: AppLocalizations.supportedLocales,
 
           // This connects your translations to the actual App UI
           localizationsDelegates: const [
-            AppLocalizations.delegate, 
+            AppLocalizations.delegate,
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
 
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-            useMaterial3: true,
-          ),
+          theme: AppTheme.light,
           home: !authProvider.isInitialized
-              ? const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                )
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
               : authProvider.user == null
-                  ? const AuthScreen()
-                  : const RoleRouter(),
+              ? const AuthScreen()
+              : const RoleRouter(),
         );
       },
     );

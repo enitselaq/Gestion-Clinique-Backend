@@ -15,7 +15,9 @@ class UserModel {
     required this.email,
   });
 
-  // Convert JSON from Django into this Dart Object
+  // Getter for convenience/compatibility
+  String get username => name;
+
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
       token: json['token'],

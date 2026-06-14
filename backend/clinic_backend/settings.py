@@ -11,6 +11,7 @@ ALLOWED_HOSTS = [host for host in os.getenv('DJANGO_ALLOWED_HOSTS', '*').split('
 
 # Application definition
 INSTALLED_APPS = [
+    'jazzmin',  # Must be before admin
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -21,6 +22,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework.authtoken',
     'core',
+    'silk',
 ]
 
 MIDDLEWARE = [
@@ -32,11 +34,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'silk.middleware.SilkyMiddleware',
 ]
 
 ROOT_URLCONF = 'clinic_backend.urls'
 
-# --- FIXED: Added the missing Templates block ---
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -54,6 +56,71 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'clinic_backend.wsgi.application'
+
+# Jazzmin Settings
+JAZZMIN_SETTINGS = {
+    "site_title": "Clinic Admin",
+    "site_header": "Clinic Admin",
+    "site_brand": "Clinic Management",
+    "welcome_sign": "Bienvenue sur le système de gestion de clinique",
+    "copyright": "Clinic Management PFE",
+    "search_model": ["core.Utilisateur", "core.Patient"],
+    "user_avatar": None,
+    "topmenu_links": [
+        {"name": "Accueil", "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"model": "core.Utilisateur"},
+    ],
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "hide_apps": [],
+    "hide_models": [],
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "core.Utilisateur": "fas fa-user",
+        "core.Patient": "fas fa-user-injured",
+        "core.Medecin": "fas fa-user-md",
+        "core.Receptionniste": "fas fa-concierge-bell",
+        "core.RendezVous": "fas fa-calendar-alt",
+        "core.Consultation": "fas fa-stethoscope",
+        "core.Ordonnance": "fas fa-file-medical",
+        "core.Medicament": "fas fa-pills",
+        "core.Paiement": "fas fa-file-invoice-dollar",
+    },
+    "default_icon_parents": "fas fa-chevron-circle-right",
+    "default_icon_children": "fas fa-circle",
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "navbar_small_text": False,
+    "footer_small_text": False,
+    "body_small_text": False,
+    "brand_small_text": False,
+    "brand_colour": "navbar-dark",
+    "accent": "accent-teal",
+    "navbar": "navbar-dark",
+    "no_navbar_border": False,
+    "navbar_fixed": False,
+    "layout_boxed": False,
+    "footer_fixed": False,
+    "sidebar_fixed": False,
+    "sidebar": "sidebar-dark-teal",
+    "sidebar_nav_small_text": False,
+    "sidebar_disable_expand": False,
+    "sidebar_nav_child_indent": False,
+    "sidebar_nav_compact_style": False,
+    "sidebar_nav_legacy_style": False,
+    "sidebar_nav_flat_style": False,
+    "theme": "flatly",
+    "dark_mode_theme": None,
+    "button_classes": {
+        "primary": "btn-teal",
+        "secondary": "btn-secondary",
+        "info": "btn-info",
+        "warning": "btn-warning",
+        "danger": "btn-danger",
+        "success": "btn-success"
+    }
+}
 
 # Rest Framework Configuration
 REST_FRAMEWORK = {
@@ -99,7 +166,10 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 AUTH_USER_MODEL = 'core.Utilisateur'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+ALLOWED_HOSTS = ['*']

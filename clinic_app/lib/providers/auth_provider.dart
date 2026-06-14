@@ -9,7 +9,7 @@ class AuthProvider with ChangeNotifier {
   bool _isInitialized = false;
 
   UserModel? get user => _user;
-  bool get isLoading => _isLoading;KO
+  bool get isLoading => _isLoading;
   bool get isInitialized => _isInitialized;
 
   AuthProvider() {
@@ -55,7 +55,9 @@ class AuthProvider with ChangeNotifier {
     // Split fullName for Django (e.g., "John Doe" -> "John" and "Doe")
     List<String> nameParts = fullName.trim().split(' ');
     String firstName = nameParts.isNotEmpty ? nameParts[0] : '';
-    String lastName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : ' ';
+    String lastName = nameParts.length > 1
+        ? nameParts.sublist(1).join(' ')
+        : ' ';
 
     try {
       bool success = await _authService.register(
