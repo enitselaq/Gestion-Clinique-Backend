@@ -10,11 +10,12 @@ from .models import (
     Ordonnance,
     Paiement,
     Patient,
+    Receptionniste,
     RendezVous,
     Utilisateur,
 )
 
-
+# ... (Previous Mixins and User Admin forms remain the same)
 class PatientProfileAdminFieldsMixin(forms.Form):
     patient_cin = forms.CharField(required=False, label='Patient CIN')
     patient_date_naissance = forms.DateField(
@@ -66,7 +67,6 @@ class PatientProfileAdminFieldsMixin(forms.Form):
         user = super().save(commit=commit)
         if not commit:
             return user
-
         if user.role == 'PATIENT':
             Patient.objects.update_or_create(
                 user=user,
@@ -80,98 +80,75 @@ class PatientProfileAdminFieldsMixin(forms.Form):
             )
         return user
 
-
 class UtilisateurAdminCreationForm(PatientProfileAdminFieldsMixin, UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = Utilisateur
-        fields = (
-            'username',
-            'first_name',
-            'last_name',
-            'email',
-            'role',
-            'telephone',
-        )
-
+        fields = ('username', 'first_name', 'last_name', 'email', 'role', 'telephone')
 
 class UtilisateurAdminChangeForm(PatientProfileAdminFieldsMixin, UserChangeForm):
     class Meta:
         model = Utilisateur
         fields = '__all__'
 
-
 @admin.register(Utilisateur)
 class UtilisateurAdmin(UserAdmin):
     form = UtilisateurAdminChangeForm
     add_form = UtilisateurAdminCreationForm
     model = Utilisateur
-    list_display = (
-        'username',
-        'first_name',
-        'last_name',
-        'email',
-        'role',
-        'telephone',
-        'is_staff',
-    )
+    list_display = ('username', 'first_name', 'last_name', 'email', 'role', 'telephone', 'is_staff')
     list_filter = ('role', 'is_staff', 'is_superuser', 'is_active')
     fieldsets = UserAdmin.fieldsets + (
         ('Clinic Role', {'fields': ('role', 'telephone')}),
-        (
-            'Patient Profile',
-            {
-                'fields': (
-                    'patient_cin',
-                    'patient_date_naissance',
-                    'patient_sexe',
-                    'patient_antecedents',
-                    'patient_allergies',
-                )
-            },
-        ),
+        ('Patient Profile', {'fields': ('patient_cin', 'patient_date_naissance', 'patient_sexe', 'patient_antecedents', 'patient_allergies')}),
     )
-    add_fieldsets = UserAdmin.add_fieldsets + (
+    # Define add_fieldsets explicitly to avoid Django admin adding unexpected
+    # pseudo-fields like `usable_password` into the ModelForm fields list.
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('username', 'password1', 'password2'),
+        }),
         ('Clinic Role', {'fields': ('first_name', 'last_name', 'email', 'role', 'telephone')}),
-        (
-            'Patient Profile',
-            {
-                'fields': (
-                    'patient_cin',
-                    'patient_date_naissance',
-                    'patient_sexe',
-                    'patient_antecedents',
-                    'patient_allergies',
-                )
-            },
-        ),
+        ('Patient Profile', {'fields': ('patient_cin', 'patient_date_naissance', 'patient_sexe', 'patient_antecedents', 'patient_allergies')}),
     )
     search_fields = ('username', 'first_name', 'last_name', 'email', 'telephone')
     ordering = ('username',)
 
+@admin.register(Receptionniste)
+class ReceptionnisteAdmin(UtilisateurAdmin):
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(role='REC')
 
+# --- UPDATED: RendezVous Admin to show Motif and Emergency ---
 @admin.register(RendezVous)
 class RendezVousAdmin(admin.ModelAdmin):
-    list_display = ('date_rdv', 'patient', 'statut')
-    list_filter = ('statut', 'date_rdv')
-
+    list_display = ('date_rdv', 'patient', 'statut', 'is_emergency')
+    list_filter = ('statut', 'is_emergency', 'date_rdv')
+    search_fields = ('patient__user__last_name', 'motif')
+    # Helps see the symptoms in the list view
+    readonly_fields = ('date_rdv', 'patient', 'motif', 'is_emergency')
 
 @admin.register(Consultation)
 class ConsultationAdmin(admin.ModelAdmin):
     list_display = ('medecin', 'date_consult', 'rdv')
-
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
     list_display = ('user', 'cin', 'date_naissance', 'sexe', 'age')
     search_fields = ('user__username', 'user__first_name', 'user__last_name', 'cin')
 
-
 @admin.register(Medecin)
 class MedecinAdmin(admin.ModelAdmin):
     list_display = ('user', 'specialite')
     search_fields = ('user__username', 'user__first_name', 'user__last_name', 'specialite')
 
-
 admin.site.register(Paiement)
 admin.site.register(Ordonnance)
 admin.site.register(Medicament)
+from .models import Notification
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('user', 'created_at', 'read')
+    list_filter = ('read', 'created_at')
+    search_fields = ('user__username', 'message')
