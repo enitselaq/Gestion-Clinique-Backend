@@ -157,22 +157,18 @@ class _AuthScreenState extends State<AuthScreen> {
                                 const SizedBox(height: 16),
                                 
                                 // Gender Selector
-                                Row(
-                                  children: [
-                                    const Text('Sexe: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    Radio<String>(
-                                      value: 'M',
-                                      groupValue: selectedSexe,
-                                      onChanged: (v) => setState(() => selectedSexe = v!),
-                                    ),
-                                    const Text('M'),
-                                    Radio<String>(
-                                      value: 'F',
-                                      groupValue: selectedSexe,
-                                      onChanged: (v) => setState(() => selectedSexe = v!),
-                                    ),
-                                    const Text('F'),
-                                  ],
+                                RadioGroup<String>(
+                                  groupValue: selectedSexe,
+                                  onChanged: (v) => setState(() => selectedSexe = v!),
+                                  child: const Row(
+                                    children: [
+                                      Text('Sexe: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      Radio<String>(value: 'M'),
+                                      Text('M'),
+                                      Radio<String>(value: 'F'),
+                                      Text('F'),
+                                    ],
+                                  ),
                                 ),
                                 
                                 // Date of Birth Picker

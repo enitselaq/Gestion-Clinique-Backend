@@ -77,13 +77,31 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
             ElevatedButton(
               onPressed: selectedDoctor == null ? null : () async {
-                await _appointmentService.updateAppointment(appt.id!, {
-                  'statut': 'CONFIRME',
-                  'medecin': selectedDoctor!.userId,
-                });
-                if (!context.mounted) return;
-                Navigator.pop(context);
-                _fetchData();
+                try {
+                  await _appointmentService.assignDoctor(appt.id!, selectedDoctor!.userId);
+                  if (!context.mounted) return;
+                  Navigator.pop(context);
+                  _fetchData();
+                } catch (e) {
+                  debugPrint('Error assigning doctor / confirming appointment: $e');
+                  if (!context.mounted) return;
+                  String message = 'Erreur: impossible de confirmer/assigner le rendez-vous.';
+                  // If DioException, try to extract server message
+                  try {
+                    if (e is DioException) {
+                      final resp = e.response?.data;
+                      if (resp is Map && resp.containsKey('detail')) {
+                        message = resp['detail'].toString();
+                      } else if (resp != null) {
+                        message = resp.toString();
+                      }
+                    }
+                  } catch (_) {}
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(message)),
+                  );
+                }
               },
               child: const Text('Confirmer'),
             ),

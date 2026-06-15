@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'core/app_theme.dart';
 import 'l10n/app_localizations.dart';
 import 'providers/auth_provider.dart';
@@ -9,6 +10,9 @@ import 'screens/auth_screen.dart';
 import 'screens/role_router.dart';
 
 void main() {
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+
   runApp(
     MultiProvider(
       providers: [
@@ -27,23 +31,21 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer2<LocaleProvider, AuthProvider>(
       builder: (context, localeProvider, authProvider, child) {
+        if (authProvider.isInitialized) {
+          FlutterNativeSplash.remove();
+        }
+
         return MaterialApp(
-          title: 'Clinic Management',
+          title: 'Argana Clinique',
           debugShowCheckedModeBanner: false,
-
           locale: localeProvider.locale,
-
-          // Use the auto-generated list of locales from your ARB files
           supportedLocales: AppLocalizations.supportedLocales,
-
-          // This connects your translations to the actual App UI
           localizationsDelegates: const [
             AppLocalizations.delegate,
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-
           theme: AppTheme.light,
           home: !authProvider.isInitialized
               ? const Scaffold(body: Center(child: CircularProgressIndicator()))

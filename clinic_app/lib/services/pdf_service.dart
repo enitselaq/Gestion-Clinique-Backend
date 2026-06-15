@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 import '../models/prescription_model.dart';
 import '../models/paiement_model.dart';
 import '../models/consultation_model.dart';
@@ -60,12 +61,24 @@ class PdfService {
       return fileName;
     }
 
+    // 1. Physically save the file (as it was before)
     final targetDir = await _resolveDownloadDirectory();
     final file = File(
       '${targetDir.path}${Platform.pathSeparator}$fileName',
     );
     await file.writeAsBytes(bytes, flush: true);
     debugPrint('PDF saved to ${file.path}');
+
+    // 2. TRIGGER PREVIEW: This opens the PDF on the screen immediately
+    try {
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: fileName,
+      );
+    } catch (e) {
+      debugPrint('Error showing PDF preview: $e');
+    }
+
     return file.path;
   }
 

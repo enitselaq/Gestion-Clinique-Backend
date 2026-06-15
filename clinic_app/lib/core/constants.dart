@@ -10,7 +10,7 @@ class ApiConstants {
 
   // TOGGLE SWITCH: 
   // Set to true for your real phone. Change to false for the virtual emulator
-  static const bool _isUsingPhysicalPhone = false;
+  static const bool _isUsingPhysicalPhone = true;
 
   static String get baseUrl {
     const override = String.fromEnvironment('API_BASE_URL');

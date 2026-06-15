@@ -29,11 +29,10 @@ class ApiClient {
           return handler.next(options);
         },
         onError: (DioException e, handler) {
-          if (e.response?.statusCode == 403) {
-            debugPrint('DEBUG: 403 Forbidden Error at ${e.requestOptions.path}');
-            debugPrint('DEBUG: Response Data: ${e.response?.data}');
-            debugPrint('DEBUG: Request Headers: ${e.requestOptions.headers}');
-          }
+          debugPrint('DEBUG: HTTP Error at ${e.requestOptions.path} - ${e.response?.statusCode}');
+          debugPrint('DEBUG: Response Data: ${e.response?.data}');
+          debugPrint('DEBUG: Request Headers: ${e.requestOptions.headers}');
+          debugPrint('DEBUG: Request Body: ${e.requestOptions.data}');
           return handler.next(e);
         },
       ),

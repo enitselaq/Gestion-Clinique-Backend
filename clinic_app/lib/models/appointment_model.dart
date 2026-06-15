@@ -36,13 +36,16 @@ class AppointmentModel {
   }
 
   Map<String, dynamic> toJson() {
-    // We send a clean date format and the motif.
-    // We REMOVE 'patient' and 'statut' fields.
-    // Modern backends detect the patient from the Token automatically.
-    return {
+    final data = <String, dynamic>{
       'date_rdv': "${dateRdv.year}-${dateRdv.month.toString().padLeft(2, '0')}-${dateRdv.day.toString().padLeft(2, '0')} ${dateRdv.hour.toString().padLeft(2, '0')}:${dateRdv.minute.toString().padLeft(2, '0')}:00",
+      'patient': patientId,
       'motif': motif,
       'is_emergency': isEmergency,
+      'statut': statut,
     };
+    if (medecinId != null) {
+      data['medecin'] = medecinId;
+    }
+    return data;
   }
 }

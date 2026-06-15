@@ -43,6 +43,15 @@ class AppointmentService {
     }
   }
 
+  Future<AppointmentModel> assignDoctor(int id, int medecinId) async {
+    try {
+      final response = await _dio.post('rendezvous/$id/assign-doctor/', data: {'medecin': medecinId});
+      return AppointmentModel.fromJson(response.data);
+    } on DioException {
+      rethrow;
+    }
+  }
+
   Future<AppointmentModel> updateAppointmentStatus(
     int id,
     String status,
