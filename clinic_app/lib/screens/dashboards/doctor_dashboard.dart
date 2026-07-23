@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../core/app_theme.dart';
 import '../../models/appointment_model.dart';
 import '../../models/consultation_model.dart';
 import '../../models/medicament_model.dart';
 import '../../models/patient_model.dart';
-import '../../models/prescription_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/appointment_service.dart';
 import '../../services/consultation_service.dart';
-import '../../services/user_service.dart';
-import '../../services/prescription_service.dart';
 import '../../services/medicine_service.dart';
-import '../../services/pdf_service.dart';
-import '../../widgets/password_dialogs.dart';
+import '../../services/prescription_service.dart';
+import '../../services/user_service.dart';
 
 class DoctorDashboard extends StatefulWidget {
   const DoctorDashboard({super.key});
@@ -24,14 +22,12 @@ class DoctorDashboard extends StatefulWidget {
 class _DoctorDashboardState extends State<DoctorDashboard> {
   final AppointmentService _appointmentService = AppointmentService();
   final ConsultationService _consultationService = ConsultationService();
-  final PrescriptionService _prescriptionService = PrescriptionService();
-  final MedicineService _medicineService = MedicineService();
   final UserService _userService = UserService();
 
-  List<AppointmentModel> _myAppointments = [];
+  List<AppointmentModel> _assignedAppointments = [];
+  List<AppointmentModel> _patientQueue = [];
   List<ConsultationModel> _consultations = [];
-  List<PrescriptionModel> _prescriptions = [];
-  Map<int, PatientModel> _patientsById = {};
+  List<PatientModel> _patients = [];
   bool _isLoading = true;
 
   @override
@@ -41,555 +37,539 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
   }
 
   Future<void> _fetchData() async {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final doctorId = authProvider.user?.profileId;
-
+    final doctorId = Provider.of<AuthProvider>(context, listen: false).user?.profileId;
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final results = await Future.wait([
         _appointmentService.getAppointments(),
         _consultationService.getConsultations(),
-        _prescriptionService.getPrescriptions(),
         _userService.getPatients(),
       ]);
-
       if (!mounted) return;
-
-      final appointments = results[0] as List<AppointmentModel>;
+      final appts = results[0] as List<AppointmentModel>;
       final consultations = results[1] as List<ConsultationModel>;
-      final prescriptions = results[2] as List<PrescriptionModel>;
-      final patients = results[3] as List<PatientModel>;
-      final visibleAppointments = doctorId != null
-          ? appointments.where((a) => a.medecinId == doctorId).toList()
-          : appointments;
-      final consultationIds = consultations
-          .map((c) => c.id)
-          .whereType<int>()
-          .toSet();
-
+      final patients = results[2] as List<PatientModel>;
       setState(() {
-        _myAppointments = visibleAppointments;
-        _consultations = consultations;
-        _prescriptions = prescriptions
-            .where((p) => consultationIds.contains(p.consultationId))
+        _assignedAppointments = appts
+            .where((a) => a.medecinId == doctorId && (a.statut == 'CONFIRME' || a.statut == 'ARRIVE'))
             .toList();
-        _patientsById = {
-          for (final patient in patients) patient.userId: patient,
-        };
+        _consultations = consultations.where((c) => c.medecinId == doctorId).toList();
+        _patients = patients.where((p) => _assignedAppointments.any((a) => a.patientId == p.userId)).toList();
+        final grouped = <int, AppointmentModel>{};
+        for (final appt in _assignedAppointments) {
+          final current = grouped[appt.patientId];
+          if (current == null || appt.dateRdv.isAfter(current.dateRdv)) {
+            grouped[appt.patientId] = appt;
+          }
+        }
+        _patientQueue = grouped.values.toList()
+          ..sort((a, b) => b.dateRdv.compareTo(a.dateRdv));
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint('Error loading doctor dashboard: $e');
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error fetching data: $e')));
     }
   }
 
-  void _showLogoutConfirmation(BuildContext context) {
-    showDialog(
+  void _startConsultation(AppointmentModel appt) {
+    showModalBottomSheet(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ConsultationForm(
+        appointment: appt,
+        onComplete: () {
+          _fetchData();
+          Navigator.pop(context);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context);
+    final waitingCount = _assignedAppointments.where((a) => a.statut == 'ARRIVE').length;
+
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Espace Medecin'),
+              Text(
+                authProvider.user?.name ?? 'Service de consultation',
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              Provider.of<AuthProvider>(context, listen: false).logout();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Patients'),
+              Tab(text: 'Diagnostics'),
+            ],
+          ),
+          actions: [
+            IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh_rounded)),
+            IconButton(
+              onPressed: () => authProvider.logout(),
+              icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
             ),
-            child: const Text('Logout'),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                    _buildHeroCard(authProvider.user?.name ?? ''),
+                    const SizedBox(height: 16),
+                    _buildMetrics(waitingCount),
+                    const SizedBox(height: 18),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          _buildAppointmentsTab(),
+                          _buildConsultationsTab(),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildHeroCard(String doctorName) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.primaryTeal,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const CircleAvatar(
+            radius: 28,
+            backgroundColor: Colors.white24,
+            child: Icon(Icons.medical_services_outlined, color: Colors.white, size: 28),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Bienvenue au service de consultation', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                Text(
+                  doctorName.isEmpty ? 'Medecin' : doctorName,
+                  style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_patientQueue.length} patients assignes, ${_consultations.length} diagnostics disponibles',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _showConsultationDialog(AppointmentModel appt) {
-    final formKey = GlobalKey<FormState>();
-    String diagnostic = '';
-    String notes = '';
-    final drafts = <_MedicineDraft>[_MedicineDraft()];
-    final patient = _patientsById[appt.patientId];
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Consultation: ${appt.patientName}'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (patient != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              patient.fullName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Age: ${patient.age ?? 'N/A'} | Sex: ${patient.sexe ?? 'N/A'} | CIN: ${patient.cin ?? 'N/A'}',
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'History: ${patient.antecedents.trim().isEmpty ? 'None recorded' : patient.antecedents}',
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Allergies: ${patient.allergies.trim().isEmpty ? 'None recorded' : patient.allergies}',
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    TextFormField(
-                      decoration: const InputDecoration(
-                        labelText: 'Diagnostic',
-                      ),
-                      maxLines: 3,
-                      onChanged: (v) => diagnostic = v,
-                      validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                    ),
-                    TextFormField(
-                      decoration: const InputDecoration(labelText: 'Notes'),
-                      maxLines: 3,
-                      onChanged: (v) => notes = v,
-                    ),
-                    const Divider(),
-                    Row(
-                      children: [
-                        const Expanded(child: Text('Prescription (Medicines)')),
-                        TextButton.icon(
-                          onPressed: () => setDialogState(
-                            () => drafts.add(_MedicineDraft()),
-                          ),
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add'),
-                        ),
-                      ],
-                    ),
-                    ...drafts.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final draft = entry.value;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Text('Medicine ${index + 1}'),
-                                  const Spacer(),
-                                  if (drafts.length > 1)
-                                    IconButton(
-                                      onPressed: () => setDialogState(
-                                        () => drafts.removeAt(index),
-                                      ),
-                                      icon: const Icon(Icons.close),
-                                      tooltip: 'Remove',
-                                    ),
-                                ],
-                              ),
-                              TextFormField(
-                                decoration: const InputDecoration(
-                                  labelText: 'Generic name',
-                                ),
-                                onChanged: (v) => draft.nomGenerique = v,
-                              ),
-                              TextFormField(
-                                decoration: const InputDecoration(
-                                  labelText: 'Dosage',
-                                ),
-                                onChanged: (v) => draft.dosage = v,
-                              ),
-                              TextFormField(
-                                decoration: const InputDecoration(
-                                  labelText: 'Instructions',
-                                ),
-                                onChanged: (v) => draft.instructions = v,
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                try {
-                  final authProvider = Provider.of<AuthProvider>(
-                    context,
-                    listen: false,
-                  );
-                  final doctorPk =
-                      authProvider.user?.profileId ?? appt.medecinId;
-                  if (doctorPk == null || appt.id == null) {
-                    throw Exception(
-                      'Missing doctor or appointment identifier.',
-                    );
-                  }
-
-                  final consult = ConsultationModel(
-                    diagnostic: diagnostic.trim(),
-                    notes: notes.trim(),
-                    rdvId: appt.id!,
-                    medecinId: doctorPk,
-                  );
-                  final savedConsult = await _consultationService
-                      .createConsultation(consult);
-
-                  final medDrafts = drafts
-                      .where(
-                        (d) =>
-                            d.nomGenerique.trim().isNotEmpty ||
-                            d.dosage.trim().isNotEmpty ||
-                            d.instructions.trim().isNotEmpty,
-                      )
-                      .toList();
-                  if (medDrafts.isNotEmpty) {
-                    final ordonnance = await _prescriptionService
-                        .createOrdonnance(consultationId: savedConsult.id!);
-                    final ordonnanceId = ordonnance.id;
-                    if (ordonnanceId == null) {
-                      throw Exception(
-                        'Ordonnance id missing from server response.',
-                      );
-                    }
-                    for (final d in medDrafts) {
-                      await _medicineService.createMedicament(
-                        MedicamentModel(
-                          ordonnanceId: ordonnanceId,
-                          nomGenerique: d.nomGenerique.trim(),
-                          dosage: d.dosage.trim(),
-                          instructions: d.instructions.trim(),
-                        ),
-                      );
-                    }
-                  }
-
-                  await _appointmentService.updateAppointmentStatus(
-                    appt.id!,
-                    'TERMINE',
-                  );
-
-                  if (!dialogContext.mounted) return;
-                  Navigator.pop(dialogContext);
-                  _fetchData();
-                } catch (e) {
-                  if (!dialogContext.mounted) return;
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(content: Text('Error saving consultation: $e')),
-                  );
-                }
-              },
-              child: const Text('Save & Complete'),
-            ),
-          ],
-        ),
-      ),
+  Widget _buildMetrics(int waitingCount) {
+    return Row(
+      children: [
+        Expanded(child: _metricCard('Patients', _patientQueue.length, Icons.assignment_ind, AppTheme.primaryTeal)),
+        const SizedBox(width: 12),
+        Expanded(child: _metricCard('En attente', waitingCount, Icons.hourglass_bottom, Colors.orange)),
+        const SizedBox(width: 12),
+        Expanded(child: _metricCard('Termines', _consultations.length, Icons.task_alt, Colors.green)),
+      ],
     );
   }
 
-  void _showEditConsultationDialog(ConsultationModel consultation) {
-    if (consultation.id == null) return;
-    final formKey = GlobalKey<FormState>();
-    String diagnostic = consultation.diagnostic;
-    String notes = consultation.notes;
-    final relatedAppointment = _myAppointments
-        .where((appt) => appt.id == consultation.rdvId)
-        .firstOrNull;
-    final patient = relatedAppointment != null
-        ? _patientsById[relatedAppointment.patientId]
-        : null;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Edit Consultation: ${consultation.patientName ?? 'Patient'}'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (patient != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              patient.fullName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Age: ${patient.age ?? 'N/A'} | Sex: ${patient.sexe ?? 'N/A'} | CIN: ${patient.cin ?? 'N/A'}',
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    TextFormField(
-                      initialValue: diagnostic,
-                      decoration: const InputDecoration(
-                        labelText: 'Diagnostic',
-                      ),
-                      maxLines: 3,
-                      onChanged: (v) => diagnostic = v,
-                      validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      initialValue: notes,
-                      decoration: const InputDecoration(labelText: 'Notes'),
-                      maxLines: 4,
-                      onChanged: (v) => notes = v,
-                    ),
-                  ],
-                ),
-              ),
+  Widget _metricCard(String label, int value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$value', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.mutedSlate)),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                try {
-                  await _consultationService.updateConsultation(
-                    consultation.id!,
-                    {
-                      'diagnostic': diagnostic.trim(),
-                      'notes': notes.trim(),
-                    },
-                  );
-                  if (!dialogContext.mounted) return;
-                  Navigator.pop(dialogContext);
-                  _fetchData();
-                } catch (e) {
-                  if (!dialogContext.mounted) return;
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(content: Text('Error updating consultation: $e')),
-                  );
-                }
-              },
-              child: const Text('Save Changes'),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
   Widget _buildAppointmentsTab() {
-    if (_myAppointments.isEmpty) {
-      return const Center(child: Text('No appointments assigned'));
+    if (_patientQueue.isEmpty) {
+      return _buildEmptyState('Aucun patient assigne pour le moment.');
     }
-
     return ListView.builder(
-      itemCount: _myAppointments.length,
-      itemBuilder: (context, index) {
-        final appt = _myAppointments[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: ListTile(
-            title: Text(appt.patientName ?? 'Patient #${appt.patientId}'),
-            subtitle: Text(
-              '${appt.dateRdv.toLocal().toIso8601String().replaceFirst('T', ' ').substring(0, 16)}\nStatus: ${appt.statut}',
-            ),
-            trailing: appt.statut != 'TERMINE' && appt.statut != 'ANNULE'
-                ? (appt.statut == 'CONFIRME'
-                    ? ElevatedButton(
-                        onPressed: () => _showConsultationDialog(appt),
-                        child: const Text('Consult'),
-                      )
-                    : const Tooltip(
-                        message: 'Appointment must be confirmed first',
-                        child: Icon(Icons.hourglass_top, color: Colors.orange),
-                      ))
-                : const Icon(Icons.done_all, color: Colors.blue),
+      itemCount: _patientQueue.length,
+      itemBuilder: (context, index) => _buildAppointmentCard(_patientQueue[index]),
+    );
+  }
+
+  Widget _buildAppointmentCard(AppointmentModel appt) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        onTap: () => _showPatientDetails(appt),
+        contentPadding: const EdgeInsets.all(16),
+        leading: CircleAvatar(
+          backgroundColor: appt.isEmergency ? Colors.red.withValues(alpha: 0.1) : AppTheme.primaryTeal.withValues(alpha: 0.1),
+          child: Icon(appt.isEmergency ? Icons.emergency : Icons.person, color: appt.isEmergency ? Colors.red : AppTheme.primaryTeal),
+        ),
+        title: Text(appt.patientName ?? 'Patient', style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Statut: ${appt.statut}'),
+              Text('Date: ${appt.dateRdv.toString().substring(0, 10)}'),
+              Text('Motif: ${appt.motif ?? "Diagnostic"}'),
+              if (appt.isEmergency) const Text('URGENCE / AMBULANCE', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            ],
           ),
-        );
-      },
+        ),
+        trailing: const Icon(Icons.chevron_right),
+      ),
+    );
+  }
+
+  void _showPatientDetails(AppointmentModel appt) {
+    final patientMatches = _patients.where((p) => p.userId == appt.patientId).toList();
+    final patient = patientMatches.isNotEmpty ? patientMatches.first : null;
+    final patientAppointments = _assignedAppointments.where((a) => a.patientId == appt.patientId).toList();
+    final patientConsultations = _consultations.where((c) => patientAppointments.any((a) => a.id == c.rdvId)).toList();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    appt.patientName ?? 'Patient',
+                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text('Motif: ${appt.motif ?? "Diagnostic"}', style: const TextStyle(color: AppTheme.mutedSlate)),
+            const SizedBox(height: 18),
+            _detailLine('CIN', patient?.cin ?? 'N/A'),
+            _detailLine('Telephone', patient?.phone ?? 'N/A'),
+            _detailLine('Sexe', patient?.sexe ?? 'N/A'),
+            _detailLine('Age', patient?.age?.toString() ?? 'N/A'),
+            _detailLine('Statut', appt.statut),
+            _detailLine('Date demandee', appt.dateRdv.toString().substring(0, 10)),
+            _detailLine('Demandes', patientAppointments.length.toString()),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: (appt.statut == 'CONFIRME' || appt.statut == 'ARRIVE') ? () => _startConsultation(appt) : null,
+                    icon: const Icon(Icons.medical_information_outlined),
+                    label: const Text('Creer consultation'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const Text('Consultations recentes', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Expanded(
+              child: patientConsultations.isEmpty
+                  ? const Center(child: Text('Aucune consultation pour ce rendez-vous.'))
+                  : ListView.builder(
+                      itemCount: patientConsultations.length,
+                      itemBuilder: (context, index) {
+                        final c = patientConsultations[index];
+                        return Card(
+                          child: ListTile(
+                            title: Text(c.diagnostic),
+                            subtitle: Text(c.dateConsult?.toString().substring(0, 10) ?? ''),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailLine(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 120, child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold))),
+          Expanded(child: Text(value)),
+        ],
+      ),
     );
   }
 
   Widget _buildConsultationsTab() {
     if (_consultations.isEmpty) {
-      return const Center(child: Text('No consultation history yet'));
+      return _buildEmptyState('Aucun diagnostic cree.');
     }
-
     return ListView.builder(
       itemCount: _consultations.length,
       itemBuilder: (context, index) {
-        final consult = _consultations[index];
+        final c = _consultations[index];
         return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: const CircleAvatar(
-              child: Icon(Icons.medical_information_outlined),
-            ),
-            title: Text(consult.patientName ?? 'Patient'),
-            subtitle: Text(
-              'Diagnostic: ${consult.diagnostic}\n'
-              'Date: ${consult.dateConsult != null ? consult.dateConsult!.toIso8601String().split('T')[0] : 'N/A'}\n'
-              'Notes: ${consult.notes.isEmpty ? 'No notes' : consult.notes}',
-            ),
+            leading: const CircleAvatar(child: Icon(Icons.description_outlined)),
+            title: Text(c.patientName ?? 'Patient'),
+            subtitle: Text('${c.diagnostic}\n${c.dateConsult?.toString().substring(0, 10) ?? ''}'),
             isThreeLine: true,
-            trailing: IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: 'Edit consultation',
-              onPressed: () => _showEditConsultationDialog(consult),
-            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildPrescriptionsTab() {
-    if (_prescriptions.isEmpty) {
-      return const Center(child: Text('No ordonnance history yet'));
-    }
-
-    return ListView.builder(
-      itemCount: _prescriptions.length,
-      itemBuilder: (context, index) {
-        final ordonnance = _prescriptions[index];
-        final consultation = _consultations
-            .where((c) => c.id == ordonnance.consultationId)
-            .firstOrNull;
-
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.receipt_long)),
-            title: Text('Ordonnance #${ordonnance.id ?? ''}'),
-            subtitle: Text(
-              'Patient: ${consultation?.patientName ?? 'N/A'}\n'
-              'Date: ${ordonnance.dateCreation != null ? ordonnance.dateCreation!.toIso8601String().split('T')[0] : 'N/A'}\n'
-              'Medicines: ${ordonnance.medicaments.length}',
-            ),
-            isThreeLine: true,
-            trailing: IconButton(
-              icon: const Icon(Icons.picture_as_pdf),
-              onPressed: () => PdfService.exportPrescription(
-                ordonnance: ordonnance,
-                patientName: consultation?.patientName ?? '',
-                doctorName: consultation?.medecinName ?? '',
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Doctor Dashboard'),
-          bottom: const TabBar(
-            isScrollable: true,
-            tabs: [
-              Tab(text: 'Appointments'),
-              Tab(text: 'Consultations'),
-              Tab(text: 'Ordonnances'),
-            ],
-          ),
-          actions: [
-            IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh)),
-            IconButton(
-              onPressed: () => showChangePasswordDialog(context),
-              icon: const Icon(Icons.lock_reset),
-              tooltip: 'Change password',
-            ),
-            IconButton(
-              onPressed: () => _showLogoutConfirmation(context),
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-            ),
-          ],
-        ),
-        body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                children: [
-                  _buildAppointmentsTab(),
-                  _buildConsultationsTab(),
-                  _buildPrescriptionsTab(),
-                ],
-              ),
+  Widget _buildEmptyState(String message) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inbox_outlined, size: 60, color: Colors.grey[300]),
+          const SizedBox(height: 16),
+          Text(message, style: const TextStyle(color: Colors.grey)),
+        ],
       ),
     );
   }
 }
 
-class _MedicineDraft {
-  String nomGenerique = '';
-  String dosage = '';
-  String instructions = '';
+class _ConsultationForm extends StatefulWidget {
+  final AppointmentModel appointment;
+  final VoidCallback onComplete;
+
+  const _ConsultationForm({required this.appointment, required this.onComplete});
+
+  @override
+  State<_ConsultationForm> createState() => _ConsultationFormState();
 }
 
-extension _FirstOrNullExtension<E> on Iterable<E> {
-  E? get firstOrNull => isEmpty ? null : first;
+class _ConsultationFormState extends State<_ConsultationForm> {
+  final _diagController = TextEditingController();
+  final _notesController = TextEditingController();
+  final List<Map<String, String>> _meds = [];
+  bool _isSaving = false;
+
+  final ConsultationService _consultationService = ConsultationService();
+  final PrescriptionService _prescriptionService = PrescriptionService();
+  final MedicineService _medicineService = MedicineService();
+  final AppointmentService _appointmentService = AppointmentService();
+
+  @override
+  void dispose() {
+    _diagController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  void _addMedication() {
+    final nameController = TextEditingController();
+    final dosageController = TextEditingController();
+    final instrController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Ajouter un medicament'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Nom du medicament')),
+            TextField(controller: dosageController, decoration: const InputDecoration(labelText: 'Dosage')),
+            TextField(controller: instrController, decoration: const InputDecoration(labelText: 'Instructions')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () {
+              if (nameController.text.trim().isEmpty) return;
+              setState(() {
+                _meds.add({
+                  'name': nameController.text.trim(),
+                  'dosage': dosageController.text.trim(),
+                  'instructions': instrController.text.trim(),
+                });
+              });
+              Navigator.pop(context);
+            },
+            child: const Text('Ajouter'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _submitConsultation() async {
+    if (_diagController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Le diagnostic est requis.')));
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final doctorId = Provider.of<AuthProvider>(context, listen: false).user?.profileId;
+      final consultation = await _consultationService.createConsultation(
+        ConsultationModel(
+          diagnostic: _diagController.text.trim(),
+          notes: _notesController.text.trim(),
+          rdvId: widget.appointment.id!,
+          medecinId: doctorId!,
+        ),
+      );
+
+      if (_meds.isNotEmpty) {
+        final prescription = await _prescriptionService.createOrdonnance(consultationId: consultation.id!);
+        for (final med in _meds) {
+          await _medicineService.createMedicament(
+            MedicamentModel(
+              ordonnanceId: prescription.id!,
+              nomGenerique: med['name']!,
+              dosage: med['dosage']!,
+              instructions: med['instructions']!,
+            ),
+          );
+        }
+      }
+
+      await _appointmentService.updateAppointmentStatus(widget.appointment.id!, 'TERMINE');
+      widget.onComplete();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.9,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  'Consultation - ${widget.appointment.patientName ?? "Patient"}',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+            ],
+          ),
+          Text('Motif: ${widget.appointment.motif ?? "Diagnostic"}', style: const TextStyle(color: AppTheme.mutedSlate)),
+          const Divider(height: 28),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Diagnostic', style: TextStyle(fontWeight: FontWeight.bold)),
+                  TextField(controller: _diagController, maxLines: 3, decoration: const InputDecoration(hintText: 'Conclusion medicale')),
+                  const SizedBox(height: 18),
+                  const Text('Observations / notes', style: TextStyle(fontWeight: FontWeight.bold)),
+                  TextField(controller: _notesController, maxLines: 4, decoration: const InputDecoration(hintText: 'Notes complementaires')),
+                  const SizedBox(height: 22),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Ordonnance', style: TextStyle(fontWeight: FontWeight.bold)),
+                      TextButton.icon(onPressed: _addMedication, icon: const Icon(Icons.add), label: const Text('Medicament')),
+                    ],
+                  ),
+                  ..._meds.map(
+                    (m) => Card(
+                      child: ListTile(
+                        title: Text(m['name']!),
+                        subtitle: Text('${m['dosage']} - ${m['instructions']}'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          onPressed: () => setState(() => _meds.remove(m)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _isSaving ? null : _submitConsultation,
+              style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+              child: _isSaving
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('Finaliser la consultation'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

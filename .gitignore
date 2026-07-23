@@ -1,4 +1,43 @@
-venv/  
-.venv/  
-__pycache__/  
-db.sqlite3 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Flutter
+clinic_app/.dart_tool/
+clinic_app/build/
+clinic_app/.packages
+clinic_app/.flutter-plugins
+clinic_app/.flutter-plugins-dependencies
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment files
+.env
+.env.local
+
+# Dev tools
+clinic_app/devtools_options.yaml

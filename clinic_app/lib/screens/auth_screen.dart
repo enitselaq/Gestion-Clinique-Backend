@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/locale_provider.dart';
 import 'package:clinic_app/l10n/app_localizations.dart';
@@ -14,8 +15,6 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   bool isLogin = true;
   bool _showLoginPassword = false;
-  bool _showForgotPassword = false;
-  bool _showForgotConfirmPassword = false;
   final _formKey = GlobalKey<FormState>();
 
   DateTime? selectedDate;
@@ -37,62 +36,6 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime(2000),
-      firstDate: DateTime(1920),
-      lastDate: DateTime.now(),
-    );
-    if (picked != null) {
-      setState(() => selectedDate = picked);
-    }
-  }
-
-  String? _validateRequired(String? value, String message) {
-    if (value == null || value.trim().isEmpty) {
-      return message;
-    }
-    return null;
-  }
-
-  String? _validateUsername(String? value, String message) {
-    final base = _validateRequired(value, message);
-    if (base != null) return base;
-    if (!RegExp(r'^[a-zA-Z0-9._-]{3,}$').hasMatch(value!.trim())) {
-      return 'Use at least 3 characters without spaces';
-    }
-    return null;
-  }
-
-  String? _validatePassword(String? value, String message) {
-    final base = _validateRequired(value, message);
-    if (base != null) return base;
-    if (value!.trim().length < 6) {
-      return 'Password must contain at least 6 characters';
-    }
-    return null;
-  }
-
-  String? _validatePhone(String? value, String message) {
-    final base = _validateRequired(value, message);
-    if (base != null) return base;
-    final normalized = value!.replaceAll(RegExp(r'\s+'), '');
-    if (!RegExp(r'^[0-9+\-]{8,15}$').hasMatch(normalized)) {
-      return 'Invalid phone number';
-    }
-    return null;
-  }
-
-  String? _validateCin(String? value, String message) {
-    final base = _validateRequired(value, message);
-    if (base != null) return base;
-    if (!RegExp(r'^[A-Za-z0-9]{4,20}$').hasMatch(value!.trim())) {
-      return 'Invalid CIN format';
-    }
-    return null;
-  }
-
   void _submit() async {
     final l10n = AppLocalizations.of(context)!;
     if (!_formKey.currentState!.validate()) return;
@@ -106,11 +49,10 @@ class _AuthScreenState extends State<AuthScreen> {
         _passController.text,
       );
     } else {
-      if (!mounted) return;
       if (selectedDate == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(l10n.selectBirthDate)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.selectBirthDate)),
+        );
         return;
       }
 
@@ -123,18 +65,6 @@ class _AuthScreenState extends State<AuthScreen> {
         sexe: selectedSexe,
         dob: selectedDate!,
       );
-
-      if (!mounted) return;
-      if (success) {
-        setState(() => isLogin = true);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.accountCreated),
-            backgroundColor: Colors.green,
-          ),
-        );
-        return;
-      }
     }
 
     if (!mounted) return;
@@ -145,372 +75,147 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<void> _showForgotPasswordDialog() async {
-    final formKey = GlobalKey<FormState>();
-    final usernameController = TextEditingController(
-      text: _emailController.text.trim(),
-    );
-    final cinController = TextEditingController();
-    final newPasswordController = TextEditingController();
-    DateTime? birthDate;
-
-    await showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Forgot password'),
-          content: SizedBox(
-            width: 420,
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _buildTextField(
-                    usernameController,
-                    'Username',
-                    Icons.alternate_email,
-                    validator: (value) =>
-                        _validateUsername(value, 'Required'),
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    cinController,
-                    'CIN',
-                    Icons.badge,
-                    validator: (value) => _validateCin(value, 'Required'),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: birthDate ?? DateTime(2000),
-                          firstDate: DateTime(1920),
-                          lastDate: DateTime.now(),
-                        );
-                        if (picked != null) {
-                          setDialogState(() => birthDate = picked);
-                        }
-                      },
-                      icon: const Icon(Icons.calendar_today),
-                      label: Text(
-                        birthDate == null
-                            ? 'Birth date'
-                            : '${birthDate!.day}/${birthDate!.month}/${birthDate!.year}',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: newPasswordController,
-                    obscureText: !_showForgotPassword,
-                    decoration: InputDecoration(
-                      labelText: 'New password',
-                      prefixIcon: Icon(Icons.lock, color: Colors.blue[800]),
-                      suffixIcon: IconButton(
-                        onPressed: () => setDialogState(
-                          () => _showForgotPassword = !_showForgotPassword,
-                        ),
-                        icon: Icon(
-                          _showForgotPassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                        ),
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.white,
-                    ),
-                    validator: (value) =>
-                        _validatePassword(value, 'Required'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    obscureText: !_showForgotConfirmPassword,
-                    decoration: InputDecoration(
-                      labelText: 'Confirm new password',
-                      prefixIcon: Icon(Icons.lock_reset, color: Colors.blue[800]),
-                      suffixIcon: IconButton(
-                        onPressed: () => setDialogState(
-                          () => _showForgotConfirmPassword =
-                              !_showForgotConfirmPassword,
-                        ),
-                        icon: Icon(
-                          _showForgotConfirmPassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                        ),
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: Colors.white,
-                    ),
-                    validator: (value) {
-                      if ((value ?? '').isEmpty) return 'Required';
-                      if (value != newPasswordController.text) {
-                        return 'Passwords do not match';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
-                if (birthDate == null) {
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    const SnackBar(content: Text('Birth date is required')),
-                  );
-                  return;
-                }
-                final authProvider = Provider.of<AuthProvider>(
-                  context,
-                  listen: false,
-                );
-                final success = await authProvider.forgotPasswordReset(
-                  username: usernameController.text.trim(),
-                  cin: cinController.text.trim().toUpperCase(),
-                  dateNaissance: birthDate!,
-                  newPassword: newPasswordController.text,
-                );
-                if (!dialogContext.mounted) return;
-                Navigator.pop(dialogContext);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      success
-                          ? 'Password reset successfully. You can log in now.'
-                          : 'Password reset failed',
-                    ),
-                    backgroundColor: success ? Colors.green : Colors.red,
-                  ),
-                );
-              },
-              child: const Text('Reset'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final localeProvider = Provider.of<LocaleProvider>(context);
     final l10n = AppLocalizations.of(context)!;
 
     return Scaffold(
-      backgroundColor: Colors.blueGrey[50],
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.blue[800]!.withValues(alpha: 0.3),
-              ),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<Locale>(
-                value: localeProvider.locale,
-                icon: Icon(Icons.language, color: Colors.blue[800], size: 20),
-                onChanged: (Locale? newLocale) {
-                  if (newLocale != null) localeProvider.setLocale(newLocale);
-                },
-                items: const [
-                  DropdownMenuItem(value: Locale('fr'), child: Text(' FR')),
-                  DropdownMenuItem(value: Locale('ar'), child: Text(' AR')),
-                  DropdownMenuItem(value: Locale('en'), child: Text(' EN')),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            children: [
-              Icon(Icons.local_hospital, size: 80, color: Colors.blue[800]),
-              const SizedBox(height: 10),
-              Text(
-                isLogin ? l10n.welcomeBack : l10n.createAccount,
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue[900],
-                ),
-              ),
-              const SizedBox(height: 30),
-              Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                elevation: 4,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Form(
-                    key: _formKey,
+      body: Row(
+        children: [
+          if (MediaQuery.of(context).size.width > 900)
+            Expanded(
+              flex: 1,
+              child: Container(
+                color: AppTheme.primaryTeal,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(48.0),
                     child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (!isLogin) ...[
-                          _buildTextField(
-                            _nameController,
-                            l10n.fullName,
-                            Icons.person,
+                        Text(
+                          'Argana\nClinique',
+                          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                            color: Colors.white,
+                            fontSize: 64,
+                            height: 1.1,
                           ),
-                          const SizedBox(height: 15),
-                          _buildTextField(
-                            _phoneController,
-                            l10n.phoneNumber,
-                            Icons.phone,
-                            inputType: TextInputType.phone,
-                            validator: (value) =>
-                                _validatePhone(value, l10n.requiredField),
-                          ),
-                          const SizedBox(height: 15),
-                          _buildTextField(
-                            _cinController,
-                            l10n.cin,
-                            Icons.badge,
-                            validator: (value) =>
-                                _validateCin(value, l10n.requiredField),
-                          ),
-                          const SizedBox(height: 15),
-                          Row(
+                        ),
+                        const SizedBox(height: 24),
+                        Container(height: 4, width: 80, color: Colors.white24),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Solution de gestion médicale intelligente.\nAccédez à vos dossiers et rendez-vous en un clic.',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 20),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          
+          Expanded(
+            flex: 1,
+            child: Center(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 500),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Align(
+                          alignment: Alignment.topRight,
+                          child: _buildLanguageToggle(localeProvider),
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          isLogin ? l10n.welcomeBack : l10n.createAccount,
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          isLogin ? 'Veuillez vous connecter' : 'Rejoignez notre réseau de santé',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppTheme.mutedSlate),
+                        ),
+                        const SizedBox(height: 30),
+                        
+                        Form(
+                          key: _formKey,
+                          child: Column(
                             children: [
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  initialValue: selectedSexe,
-                                  decoration: InputDecoration(
-                                    labelText: l10n.sexe,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
+                              if (!isLogin) ...[
+                                _buildField(_nameController, l10n.fullName, Icons.person_outline),
+                                const SizedBox(height: 16),
+                                _buildField(_cinController, 'CIN', Icons.badge_outlined),
+                                const SizedBox(height: 16),
+                                _buildField(_phoneController, l10n.phoneNumber, Icons.phone_android_outlined),
+                                const SizedBox(height: 16),
+                                
+                                // Gender Selector
+                                RadioGroup<String>(
+                                  groupValue: selectedSexe,
+                                  onChanged: (v) => setState(() => selectedSexe = v!),
+                                  child: const Row(
+                                    children: [
+                                      Text('Sexe: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                                      Radio<String>(value: 'M'),
+                                      Text('M'),
+                                      Radio<String>(value: 'F'),
+                                      Text('F'),
+                                    ],
                                   ),
-                                  items: [
-                                    DropdownMenuItem(
-                                      value: 'M',
-                                      child: Text(l10n.male),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'F',
-                                      child: Text(l10n.female),
-                                    ),
-                                  ],
-                                  onChanged: (val) =>
-                                      setState(() => selectedSexe = val!),
+                                ),
+                                
+                                // Date of Birth Picker
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(selectedDate == null 
+                                    ? 'Date de naissance' 
+                                    : 'Né(e) le: ${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}'),
+                                  trailing: const Icon(Icons.calendar_today, color: AppTheme.primaryTeal),
+                                  onTap: () async {
+                                    final date = await showDatePicker(
+                                      context: context,
+                                      initialDate: DateTime(2000),
+                                      firstDate: DateTime(1900),
+                                      lastDate: DateTime.now(),
+                                    );
+                                    if (date != null) setState(() => selectedDate = date);
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                              ],
+                              
+                              _buildField(_emailController, l10n.username, Icons.alternate_email),
+                              const SizedBox(height: 16),
+                              _buildField(
+                                _passController, 
+                                l10n.password, 
+                                Icons.lock_outline,
+                                isPassword: true,
+                              ),
+                              const SizedBox(height: 32),
+                              
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _submit,
+                                  child: Text(isLogin ? l10n.loginBtn : l10n.registerBtn),
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 15,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  onPressed: () => _selectDate(context),
-                                  child: Text(
-                                    selectedDate == null
-                                        ? l10n.birthDate
-                                        : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
-                                  ),
+                              const SizedBox(height: 20),
+                              Center(
+                                child: TextButton(
+                                  onPressed: () => setState(() => isLogin = !isLogin),
+                                  child: Text(isLogin ? l10n.newPatient : l10n.alreadyHaveAccount),
                                 ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 15),
-                        ],
-                        _buildTextField(
-                          _emailController,
-                          l10n.username,
-                          Icons.alternate_email,
-                          validator: (value) =>
-                              _validateUsername(value, l10n.requiredField),
-                        ),
-                        const SizedBox(height: 15),
-                        _buildTextField(
-                          _passController,
-                          l10n.password,
-                          Icons.lock,
-                          isPassword: true,
-                          isPasswordVisible: _showLoginPassword,
-                          onTogglePasswordVisibility: () {
-                            setState(
-                              () => _showLoginPassword = !_showLoginPassword,
-                            );
-                          },
-                          validator: (value) =>
-                              _validatePassword(value, l10n.requiredField),
-                        ),
-                        if (isLogin)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: _showForgotPasswordDialog,
-                              child: const Text('Forgot password?'),
-                            ),
-                          ),
-                        const SizedBox(height: 30),
-                        Consumer<AuthProvider>(
-                          builder: (context, auth, _) => auth.isLoading
-                              ? const CircularProgressIndicator()
-                              : ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue[800],
-                                    minimumSize: const Size(
-                                      double.infinity,
-                                      50,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  onPressed: _submit,
-                                  child: Text(
-                                    isLogin ? l10n.loginBtn : l10n.registerBtn,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              isLogin = !isLogin;
-                              selectedDate = null;
-                            });
-                          },
-                          child: Text(
-                            isLogin ? l10n.newPatient : l10n.alreadyHaveAccount,
                           ),
                         ),
                       ],
@@ -518,45 +223,56 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ),
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildTextField(
-    TextEditingController controller,
-    String label,
-    IconData icon, {
-    bool isPassword = false,
-    bool isPasswordVisible = false,
-    VoidCallback? onTogglePasswordVisibility,
-    TextInputType inputType = TextInputType.text,
-    String? Function(String?)? validator,
-  }) {
-    final l10n = AppLocalizations.of(context)!;
+  Widget _buildField(TextEditingController controller, String label, IconData icon, {bool isPassword = false}) {
     return TextFormField(
       controller: controller,
-      obscureText: isPassword && !isPasswordVisible,
-      keyboardType: inputType,
+      obscureText: isPassword && !_showLoginPassword,
       decoration: InputDecoration(
         labelText: label,
-        prefixIcon: Icon(icon, color: Colors.blue[800]),
-        suffixIcon: isPassword
-            ? IconButton(
-                onPressed: onTogglePasswordVisibility,
-                icon: Icon(
-                  isPasswordVisible ? Icons.visibility_off : Icons.visibility,
-                ),
-              )
-            : null,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        filled: true,
-        fillColor: Colors.white,
+        prefixIcon: Icon(icon),
+        suffixIcon: isPassword ? IconButton(
+          icon: Icon(_showLoginPassword ? Icons.visibility : Icons.visibility_off),
+          onPressed: () => setState(() => _showLoginPassword = !_showLoginPassword),
+        ) : null,
       ),
-      validator:
-          validator ?? (value) => _validateRequired(value, l10n.requiredField),
+      validator: (v) => (v == null || v.isEmpty) ? 'Requis' : null,
+    );
+  }
+
+  Widget _buildLanguageToggle(LocaleProvider provider) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _langBtn('FR', const Locale('fr'), provider),
+        const Text('|', style: TextStyle(color: Colors.grey)),
+        _langBtn('AR', const Locale('ar'), provider),
+        const Text('|', style: TextStyle(color: Colors.grey)),
+        _langBtn('EN', const Locale('en'), provider),
+      ],
+    );
+  }
+
+  Widget _langBtn(String label, Locale loc, LocaleProvider provider) {
+    final isSelected = provider.locale.languageCode == loc.languageCode;
+    return GestureDetector(
+      onTap: () => provider.setLocale(loc),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? AppTheme.primaryTeal : AppTheme.mutedSlate,
+          ),
+        ),
+      ),
     );
   }
 }

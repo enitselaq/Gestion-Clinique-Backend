@@ -1,11 +1,13 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 import '../models/prescription_model.dart';
 import '../models/paiement_model.dart';
+import '../models/consultation_model.dart';
 import 'pdf_share_helper.dart';
 
 class PdfService {
@@ -59,16 +61,36 @@ class PdfService {
       return fileName;
     }
 
+    // 1. Physically save the file (as it was before)
     final targetDir = await _resolveDownloadDirectory();
     final file = File(
       '${targetDir.path}${Platform.pathSeparator}$fileName',
     );
     await file.writeAsBytes(bytes, flush: true);
     debugPrint('PDF saved to ${file.path}');
+
+    // 2. TRIGGER PREVIEW: This opens the PDF on the screen immediately
+    try {
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => bytes,
+        name: fileName,
+      );
+    } catch (e) {
+      debugPrint('Error showing PDF preview: $e');
+    }
+
     return file.path;
   }
 
-  static pw.Widget _brandHeader(String documentTitle) {
+  static Future<pw.Widget> _brandHeader(String documentTitle) async {
+    pw.ImageProvider? logo;
+    try {
+      final logoData = await rootBundle.load('assets/pdf_logo_argana.png');
+      logo = pw.MemoryImage(logoData.buffer.asUint8List());
+    } catch (e) {
+      debugPrint('Error loading logo: $e');
+    }
+
     return pw.Container(
       padding: const pw.EdgeInsets.all(18),
       decoration: pw.BoxDecoration(
@@ -80,37 +102,50 @@ class PdfService {
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
+          pw.Row(
             children: [
-              pw.Text(
-                'CLINIQUE EXEMPLE',
-                style: pw.TextStyle(
-                  fontSize: 20,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColor.fromHex('#0A4D8C'),
+              if (logo != null)
+                pw.Container(
+                  width: 60,
+                  height: 60,
+                  margin: const pw.EdgeInsets.only(right: 12),
+                  child: pw.Image(logo),
                 ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'CLINIQUE ARGANA',
+                    style: pw.TextStyle(
+                      fontSize: 18,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColor.fromHex('#0A4D8C'),
+                    ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text('Votre Santé, Notre Priorité',
+                      style: const pw.TextStyle(fontSize: 10)),
+                  pw.Text('Contact: +212 5XX XX XX XX',
+                      style: const pw.TextStyle(fontSize: 10)),
+                ],
               ),
-              pw.SizedBox(height: 4),
-              pw.Text('Adresse - Telephone - Email'),
-              pw.Text('Zone reservee au logo et au branding'),
             ],
           ),
           pw.Container(
             padding: const pw.EdgeInsets.symmetric(
               horizontal: 12,
-              vertical: 10,
+              vertical: 8,
             ),
             decoration: pw.BoxDecoration(
               color: PdfColor.fromHex('#0A4D8C'),
               borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
             ),
             child: pw.Text(
-              documentTitle,
+              documentTitle.toUpperCase(),
               style: pw.TextStyle(
                 color: PdfColor.fromHex('#FFFFFF'),
                 fontWeight: pw.FontWeight.bold,
-                fontSize: 14,
+                fontSize: 12,
               ),
             ),
           ),
@@ -125,97 +160,113 @@ class PdfService {
       child: pw.Row(
         children: [
           pw.SizedBox(
-            width: 120,
+            width: 100,
             child: pw.Text(
-              label,
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              '$label:',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11),
             ),
           ),
-          pw.Expanded(child: pw.Text(value)),
+          pw.Expanded(
+              child: pw.Text(value, style: const pw.TextStyle(fontSize: 11))),
         ],
       ),
     );
   }
 
-  static Future<String?> exportPrescription({
-    required PrescriptionModel ordonnance,
+  static Future<String?> exportFullDiagnostic({
+    required ConsultationModel consultation,
+    required PrescriptionModel? prescription,
     required String patientName,
     required String doctorName,
   }) async {
     final pdf = pw.Document();
-    final date = ordonnance.dateCreation;
+    final date = consultation.dateConsult ?? DateTime.now();
+    final header = await _brandHeader('Rapport de Consultation');
 
     pdf.addPage(
       pw.Page(
-        margin: const pw.EdgeInsets.all(28),
+        margin: const pw.EdgeInsets.all(32),
         build: (context) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            _brandHeader('Ordonnance'),
-            pw.SizedBox(height: 20),
-            _infoRow(
-              'Date',
-              date != null ? date.toIso8601String().split('T')[0] : 'N/A',
-            ),
-            _infoRow('Patient', patientName.isEmpty ? 'N/A' : patientName),
-            _infoRow('Medecin', doctorName.isEmpty ? 'N/A' : doctorName),
-            pw.SizedBox(height: 18),
-            pw.Text(
-              'Traitement prescrit',
-              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
-            ),
+            header,
+            pw.SizedBox(height: 24),
+            pw.Text('INFORMATIONS GÉNÉRALES',
+                style:
+                    pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13)),
+            pw.Divider(thickness: 1),
+            pw.SizedBox(height: 8),
+            _infoRow('Date', date.toIso8601String().split('T')[0]),
+            _infoRow('Patient', patientName),
+            _infoRow('Médecin', doctorName),
+            pw.SizedBox(height: 24),
+            pw.Text('DIAGNOSTIC & OBSERVATIONS',
+                style:
+                    pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13)),
+            pw.Divider(thickness: 1),
             pw.SizedBox(height: 10),
-            if (ordonnance.medicaments.isEmpty)
-              pw.Container(
-                padding: const pw.EdgeInsets.all(12),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColor.fromHex('#B8C7D9')),
-                  borderRadius: const pw.BorderRadius.all(
-                    pw.Radius.circular(8),
-                  ),
-                ),
-                child: pw.Text('Aucun medicament enregistre.'),
+            pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.grey100,
+                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
               ),
-            ...ordonnance.medicaments.map(
-              (m) => pw.Container(
-                margin: const pw.EdgeInsets.only(bottom: 10),
-                padding: const pw.EdgeInsets.all(12),
-                decoration: pw.BoxDecoration(
-                  border: pw.Border.all(color: PdfColor.fromHex('#B8C7D9')),
-                  borderRadius: const pw.BorderRadius.all(
-                    pw.Radius.circular(8),
-                  ),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                      m.nomGenerique,
-                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                    ),
-                    pw.SizedBox(height: 4),
-                    pw.Text('Dosage: ${m.dosage.isEmpty ? 'N/A' : m.dosage}'),
-                    pw.Text(
-                      'Instructions: ${m.instructions.isEmpty ? 'Aucune instruction' : m.instructions}',
-                    ),
-                  ],
-                ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Diagnostic:',
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                  pw.Text(consultation.diagnostic),
+                  pw.SizedBox(height: 10),
+                  pw.Text('Notes:',
+                      style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                  pw.Text(consultation.notes),
+                ],
               ),
             ),
+            if (prescription != null && prescription.medicaments.isNotEmpty) ...[
+              pw.SizedBox(height: 24),
+              pw.Text('ORDONNANCE (TRAITEMENT)',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 13)),
+              pw.Divider(thickness: 1),
+              pw.SizedBox(height: 10),
+              ...prescription.medicaments.map((m) => pw.Bullet(
+                    text: '${m.nomGenerique} - ${m.dosage}\n${m.instructions}',
+                    style: const pw.TextStyle(fontSize: 11),
+                    margin: const pw.EdgeInsets.only(bottom: 6),
+                  )),
+            ],
             pw.Spacer(),
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('Cachet de la clinique'),
-                pw.Text('Signature du medecin'),
+                pw.Column(
+                  children: [
+                    pw.Text('Cachet de la clinique',
+                        style: const pw.TextStyle(fontSize: 10)),
+                    pw.SizedBox(height: 40),
+                  ],
+                ),
+                pw.Column(
+                  children: [
+                    pw.Text('Signature du Médecin',
+                        style: const pw.TextStyle(fontSize: 10)),
+                    pw.SizedBox(height: 40),
+                  ],
+                ),
               ],
+            ),
+            pw.Center(
+              child: pw.Text('Document généré via Argana Clinic App',
+                  style: pw.TextStyle(fontSize: 8, color: PdfColors.grey500)),
             ),
           ],
         ),
       ),
     );
 
-    return await _savePdf(pdf: pdf, filePrefix: 'ordonnance');
+    return await _savePdf(pdf: pdf, filePrefix: 'rapport_medical');
   }
 
   static Future<String?> exportReceipt({
@@ -224,48 +275,43 @@ class PdfService {
   }) async {
     final pdf = pw.Document();
     final date = payment.datePaiement;
+    final header = await _brandHeader('Recu de paiement');
 
     pdf.addPage(
       pw.Page(
-        margin: const pw.EdgeInsets.all(28),
+        margin: const pw.EdgeInsets.all(32),
         build: (context) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            _brandHeader('Recu de paiement'),
-            pw.SizedBox(height: 20),
-            _infoRow('Recu', '#${payment.id ?? 'N/A'}'),
+            header,
+            pw.SizedBox(height: 24),
+            _infoRow('Reçu N°', '#${payment.id ?? 'N/A'}'),
             _infoRow(
               'Date',
               date != null ? date.toIso8601String().split('T')[0] : 'N/A',
             ),
-            _infoRow('Patient', patientName.isEmpty ? 'N/A' : patientName),
+            _infoRow('Patient', patientName),
             _infoRow('Rendez-vous', '#${payment.rdvId}'),
-            pw.SizedBox(height: 18),
+            pw.SizedBox(height: 24),
             pw.Table(
-              border: pw.TableBorder.all(color: PdfColor.fromHex('#B8C7D9')),
+              border: pw.TableBorder.all(color: PdfColors.grey400),
               columnWidths: const {
                 0: pw.FlexColumnWidth(4),
                 1: pw.FlexColumnWidth(2),
               },
               children: [
                 pw.TableRow(
-                  decoration: pw.BoxDecoration(
-                    color: PdfColor.fromHex('#EAF3FF'),
-                  ),
+                  decoration: pw.BoxDecoration(color: PdfColors.grey200),
                   children: [
                     pw.Padding(
                       padding: const pw.EdgeInsets.all(10),
-                      child: pw.Text(
-                        'Description',
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                      ),
+                      child: pw.Text('Description',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                     ),
                     pw.Padding(
                       padding: const pw.EdgeInsets.all(10),
-                      child: pw.Text(
-                        'Montant',
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                      ),
+                      child: pw.Text('Montant',
+                          style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -274,44 +320,35 @@ class PdfService {
                     pw.Padding(
                       padding: const pw.EdgeInsets.all(10),
                       child: pw.Text(
-                        'Consultation medicale / frais administratifs',
-                      ),
+                          'Consultation médicale / Frais de diagnostic'),
                     ),
                     pw.Padding(
                       padding: const pw.EdgeInsets.all(10),
-                      child: pw.Text(
-                        '${payment.montant.toStringAsFixed(2)} MAD',
-                      ),
+                      child: pw.Text('${payment.montant.toStringAsFixed(2)} MAD'),
                     ),
                   ],
                 ),
               ],
             ),
-            pw.SizedBox(height: 16),
+            pw.SizedBox(height: 20),
             pw.Align(
               alignment: pw.Alignment.centerRight,
               child: pw.Container(
                 padding: const pw.EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
+                    horizontal: 16, vertical: 10),
                 decoration: pw.BoxDecoration(
                   color: PdfColor.fromHex('#0A4D8C'),
-                  borderRadius: const pw.BorderRadius.all(
-                    pw.Radius.circular(8),
-                  ),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
                 ),
                 child: pw.Text(
-                  'Total: ${payment.montant.toStringAsFixed(2)} MAD',
+                  'TOTAL: ${payment.montant.toStringAsFixed(2)} MAD',
                   style: pw.TextStyle(
-                    color: PdfColor.fromHex('#FFFFFF'),
-                    fontWeight: pw.FontWeight.bold,
-                  ),
+                      color: PdfColors.white, fontWeight: pw.FontWeight.bold),
                 ),
               ),
             ),
             pw.Spacer(),
-            pw.Text('Signature et cachet de la clinique'),
+            pw.Text('Signature et Cachet', style: const pw.TextStyle(fontSize: 10)),
           ],
         ),
       ),

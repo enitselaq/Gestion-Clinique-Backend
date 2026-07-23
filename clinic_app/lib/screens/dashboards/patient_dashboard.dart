@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
+import 'package:intl/intl.dart';
+import '../../core/app_theme.dart';
 import '../../models/appointment_model.dart';
 import '../../models/consultation_model.dart';
 import '../../models/paiement_model.dart';
@@ -11,7 +12,7 @@ import '../../services/consultation_service.dart';
 import '../../services/payment_service.dart';
 import '../../services/prescription_service.dart';
 import '../../services/pdf_service.dart';
-import '../../widgets/password_dialogs.dart';
+import '../payment_screen.dart';
 
 class PatientDashboard extends StatefulWidget {
   const PatientDashboard({super.key});
@@ -25,8 +26,6 @@ class _PatientDashboardState extends State<PatientDashboard> {
   final ConsultationService _consultationService = ConsultationService();
   final PrescriptionService _prescriptionService = PrescriptionService();
   final PaymentService _paymentService = PaymentService();
-
-  static const double _defaultConsultationFee = 200.0;
 
   List<AppointmentModel> _appointments = [];
   List<ConsultationModel> _consultations = [];
@@ -43,7 +42,7 @@ class _PatientDashboardState extends State<PatientDashboard> {
   Future<void> _fetchData() async {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final patientId = authProvider.user?.profileId;
-
+    if (!mounted) return;
     setState(() => _isLoading = true);
     try {
       final results = await Future.wait([
@@ -52,310 +51,104 @@ class _PatientDashboardState extends State<PatientDashboard> {
         _prescriptionService.getPrescriptions(),
         _paymentService.getPayments(),
       ]);
-
       if (!mounted) return;
-
       setState(() {
         final appts = results[0] as List<AppointmentModel>;
-        final consults = results[1] as List<ConsultationModel>;
-        final ords = results[2] as List<PrescriptionModel>;
-        final pays = results[3] as List<PaiementModel>;
-
-        _appointments = patientId != null
-            ? appts.where((a) => a.patientId == patientId).toList()
-            : appts;
-        _consultations = consults
-            .where((c) => _appointments.any((a) => a.id == c.rdvId))
-            .toList();
-        _prescriptions = ords
-            .where((o) => _consultations.any((c) => c.id == o.consultationId))
-            .toList();
-        _payments = pays
-            .where((p) => _appointments.any((a) => a.id == p.rdvId))
-            .toList();
+        _appointments = patientId != null ? appts.where((a) => a.patientId == patientId).toList() : appts;
+        _consultations = (results[1] as List<ConsultationModel>).where((c) => _appointments.any((a) => a.id == c.rdvId)).toList();
+        _prescriptions = (results[2] as List<PrescriptionModel>).where((o) => _consultations.any((c) => c.id == o.consultationId)).toList();
+        _payments = (results[3] as List<PaiementModel>).where((p) => _appointments.any((a) => a.id == p.rdvId)).toList();
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint('Data fetch error: $e');
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error fetching data: $e')));
     }
   }
 
-  Map<int, PaiementModel> get _paymentsByAppointmentId {
-    return {
-      for (final payment in _payments) payment.rdvId: payment,
-    };
+  String _formatDate(DateTime? date) {
+    if (date == null) return 'N/A';
+    return DateFormat('dd/MM/yyyy').format(date);
   }
 
-  List<AppointmentModel> get _pendingOnlinePayments {
-    final paymentsByAppointmentId = _paymentsByAppointmentId;
-    return _appointments.where((appointment) {
-      return appointment.id != null &&
-          appointment.statut == 'TERMINE' &&
-          !paymentsByAppointmentId.containsKey(appointment.id);
-    }).toList();
-  }
+  Future<void> _showDiagnosticRequestDialog() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final motifController = TextEditingController();
+    bool needsAmbulance = false;
+    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
 
-  void _showLogoutConfirmation(BuildContext context) {
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              Provider.of<AuthProvider>(context, listen: false).logout();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showOnlinePaymentDialog(AppointmentModel appointment) async {
-    if (appointment.id == null) return;
-    final formKey = GlobalKey<FormState>();
-    final cardHolderController = TextEditingController();
-    final cardNumberController = TextEditingController();
-    final expiryController = TextEditingController();
-    final cvvController = TextEditingController();
-    final amountController = TextEditingController(
-      text: _defaultConsultationFee.toStringAsFixed(2),
-    );
-    bool showCardNumber = false;
-    bool showCvv = false;
-
-    await showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
+      builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(
-            'Online Payment${appointment.medecinName != null ? ' - Dr. ${appointment.medecinName}' : ''}',
-          ),
-          content: SizedBox(
-            width: 440,
-            child: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Simulated card payment for the patient portal.',
-                      style: TextStyle(color: Colors.grey[700]),
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: cardHolderController,
-                      decoration: const InputDecoration(
-                        labelText: 'Cardholder name',
-                        prefixIcon: Icon(Icons.person_outline),
-                      ),
-                      validator: (value) =>
-                          (value == null || value.trim().isEmpty)
-                          ? 'Required'
-                          : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: cardNumberController,
-                      obscureText: !showCardNumber,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: 'Card number',
-                        prefixIcon: const Icon(Icons.credit_card),
-                        suffixIcon: IconButton(
-                          onPressed: () => setDialogState(
-                            () => showCardNumber = !showCardNumber,
-                          ),
-                          icon: Icon(
-                            showCardNumber
-                                ? Icons.visibility_off
-                                : Icons.visibility,
-                          ),
-                        ),
-                      ),
-                      validator: (value) {
-                        final normalized =
-                            (value ?? '').replaceAll(RegExp(r'\s+'), '');
-                        if (normalized.length < 12 || normalized.length > 19) {
-                          return 'Invalid card number';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: expiryController,
-                            decoration: const InputDecoration(
-                              labelText: 'Expiry (MM/YY)',
-                              prefixIcon: Icon(Icons.date_range_outlined),
-                            ),
-                            validator: (value) {
-                              if (!RegExp(
-                                r'^\d{2}/\d{2}$',
-                              ).hasMatch(value ?? '')) {
-                                return 'Invalid expiry';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: cvvController,
-                            obscureText: !showCvv,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              labelText: 'CVV',
-                              prefixIcon: const Icon(Icons.lock_outline),
-                              suffixIcon: IconButton(
-                                onPressed: () =>
-                                    setDialogState(() => showCvv = !showCvv),
-                                icon: Icon(
-                                  showCvv
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                ),
-                              ),
-                            ),
-                            validator: (value) {
-                              if (!RegExp(r'^\d{3,4}$').hasMatch(value ?? '')) {
-                                return 'Invalid CVV';
-                              }
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: amountController,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Amount',
-                        prefixText: 'MAD ',
-                      ),
-                      validator: (value) =>
-                          (double.tryParse(value ?? '') ?? 0) <= 0
-                          ? 'Invalid amount'
-                          : null,
-                    ),
-                  ],
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Nouveau Diagnostic'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Veuillez décrire brièvement vos symptômes.', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: motifController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: 'Symptômes', hintText: 'Ex: Fièvre, douleur abdominale...'),
                 ),
-              ),
+                const SizedBox(height: 16),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('Date souhaitée: ${_formatDate(selectedDate)}'),
+                  trailing: const Icon(Icons.calendar_month, color: AppTheme.primaryTeal),
+                  onTap: () async {
+                    final date = await showDatePicker(context: context, initialDate: selectedDate, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 30)));
+                    if (date != null) setDialogState(() => selectedDate = date);
+                  },
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Besoin d\'ambulance ?'),
+                  subtitle: const Text('Urgences uniquement', style: TextStyle(fontSize: 11)),
+                  value: needsAmbulance,
+                  activeThumbColor: Colors.redAccent,
+                  onChanged: (val) => setDialogState(() => needsAmbulance = val),
+                ),
+              ],
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
             ElevatedButton(
               onPressed: () async {
-                if (!formKey.currentState!.validate()) return;
+                if (motifController.text.isEmpty) return;
                 try {
-                  final payment = await _paymentService.createPayment(
-                    PaiementModel(
-                      rdvId: appointment.id!,
-                      montant: double.parse(amountController.text),
-                    ),
-                  );
-                  if (!dialogContext.mounted) return;
-                  Navigator.pop(dialogContext);
-                  if (!mounted) return;
-                  final authProvider = Provider.of<AuthProvider>(
-                    context,
-                    listen: false,
-                  );
-                  final messenger = ScaffoldMessenger.of(context);
-                  final savedPath = await PdfService.exportReceipt(
-                    payment: payment,
-                    patientName: authProvider.user?.name ?? '',
-                  );
-                  await _fetchData();
-                  if (!mounted) return;
-                  messenger.showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        savedPath == null
-                            ? 'Payment completed successfully'
-                            : 'Payment completed. Receipt downloaded.',
-                      ),
-                      backgroundColor: Colors.green,
+                  await _appointmentService.createAppointment(AppointmentModel(
+                    dateRdv: selectedDate,
+                    statut: 'ATTENTE',
+                    patientId: authProvider.user!.profileId!,
+                    motif: motifController.text,
+                    isEmergency: needsAmbulance,
+                  ));
+                  if (!context.mounted) return;
+                  Navigator.pop(context);
+                  _fetchData();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Demande envoyée avec succès !'),
+                      backgroundColor: AppTheme.primaryTeal,
+                      behavior: SnackBarBehavior.floating,
                     ),
                   );
                 } catch (e) {
-                  if (!dialogContext.mounted) return;
-                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                    SnackBar(content: Text('Payment failed: $e')),
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Erreur lors de l\'envoi.'), backgroundColor: Colors.redAccent),
                   );
                 }
               },
-              child: const Text('Pay Now'),
+              child: const Text('Envoyer la demande'),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _exportPrescriptionPdf(
-    PrescriptionModel ordonnance,
-    String patientName,
-    String doctorName,
-  ) async {
-    final savedPath = await PdfService.exportPrescription(
-      ordonnance: ordonnance,
-      patientName: patientName,
-      doctorName: doctorName,
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          savedPath == null
-              ? 'Prescription PDF generated'
-              : 'Prescription PDF downloaded',
-        ),
-      ),
-    );
-  }
-
-  Future<void> _exportReceiptPdf(
-    PaiementModel payment,
-    String patientName,
-  ) async {
-    final savedPath = await PdfService.exportReceipt(
-      payment: payment,
-      patientName: patientName,
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          savedPath == null ? 'Receipt PDF generated' : 'Receipt PDF downloaded',
         ),
       ),
     );
@@ -363,153 +156,219 @@ class _PatientDashboardState extends State<PatientDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final patientName = authProvider.user?.name ?? '';
+    final authProvider = Provider.of<AuthProvider>(context);
 
-    return DefaultTabController(
-      length: 5,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('My Health Portal'),
-          bottom: const TabBar(
-            isScrollable: true,
-            tabs: [
-              Tab(text: 'Appointments'),
-              Tab(text: 'Consultations'),
-              Tab(text: 'Prescriptions'),
-              Tab(text: 'Pay Online'),
-              Tab(text: 'Payments'),
-            ],
-          ),
-          actions: [
-            IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh)),
-            IconButton(
-              onPressed: () => showChangePasswordDialog(context),
-              icon: const Icon(Icons.lock_reset),
-              tooltip: 'Change password',
-            ),
-            IconButton(
-              onPressed: () => _showLogoutConfirmation(context),
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-            ),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bonjour, ${authProvider.user?.username ?? 'Patient'}', style: const TextStyle(fontSize: 14, color: AppTheme.mutedSlate)),
+            const Text('Votre Espace Santé', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ],
         ),
-        body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                children: [
-                  _buildList(
-                    _appointments,
-                    (appt) => ListTile(
-                      title: Text(
-                        appt.medecinName != null
-                            ? 'Dr. ${appt.medecinName}'
-                            : 'Appointment',
-                      ),
-                      subtitle: Text(
-                        '${appt.dateRdv.toIso8601String().replaceFirst('T', ' ').substring(0, 16)}\nStatus: ${appt.statut}',
-                      ),
-                    ),
-                  ),
-                  _buildList(
-                    _consultations,
-                    (c) => ListTile(
-                      title: Text('Diagnostic: ${c.diagnostic}'),
-                      subtitle: Text(
-                        'Date: ${c.dateConsult != null ? c.dateConsult!.toIso8601String().split('T')[0] : 'N/A'}\nNotes: ${c.notes}',
-                      ),
-                    ),
-                  ),
-                  _buildList(_prescriptions, (o) {
-                    final consult = _consultations
-                        .where((c) => c.id == o.consultationId)
-                        .firstOrNull;
-                    final doctorName = consult?.medecinName ?? '';
-                    return ListTile(
-                      title: Text('Ordonnance #${o.id ?? ''}'),
-                      subtitle: Text(
-                        'Date: ${o.dateCreation != null ? o.dateCreation!.toIso8601String().split('T')[0] : 'N/A'}\nMedicines: ${o.medicaments.length}',
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.picture_as_pdf),
-                        onPressed: () => _exportPrescriptionPdf(
-                          o,
-                          patientName,
-                          doctorName,
-                        ),
-                      ),
-                    );
-                  }),
-                  _buildPendingPaymentsTab(),
-                  _buildList(
-                    _payments,
-                    (pay) => ListTile(
-                      title: Text('Amount: ${pay.montant} MAD'),
-                      subtitle: Text(
-                        'Date: ${pay.datePaiement != null ? pay.datePaiement!.toIso8601String().split('T')[0] : 'N/A'}\nRDV: #${pay.rdvId}',
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.receipt_long),
-                        onPressed: () => _exportReceiptPdf(pay, patientName),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
-
-  Widget _buildList(List<dynamic> items, Widget Function(dynamic) itemBuilder) {
-    if (items.isEmpty) return const Center(child: Text('No records found'));
-    return ListView.builder(
-      itemCount: items.length,
-      itemBuilder: (context, index) => Card(
-        margin: const EdgeInsets.all(8),
-        child: itemBuilder(items[index]),
-      ),
-    );
-  }
-
-  Widget _buildPendingPaymentsTab() {
-    final pendingPayments = _pendingOnlinePayments;
-    if (pendingPayments.isEmpty) {
-      return const Center(
-        child: Text('No completed appointments waiting for online payment'),
-      );
-    }
-
-    return ListView.builder(
-      itemCount: pendingPayments.length,
-      itemBuilder: (context, index) {
-        final appointment = pendingPayments[index];
-        return Card(
-          margin: const EdgeInsets.all(8),
-          child: ListTile(
-            leading: const CircleAvatar(
-              child: Icon(Icons.account_balance_wallet_outlined),
-            ),
-            title: Text(
-              appointment.medecinName != null
-                  ? 'Consultation with Dr. ${appointment.medecinName}'
-                  : 'Completed consultation',
-            ),
-            subtitle: Text(
-              '${appointment.dateRdv.toIso8601String().replaceFirst('T', ' ').substring(0, 16)}\nAmount due: ${_defaultConsultationFee.toStringAsFixed(2)} MAD',
-            ),
-            trailing: ElevatedButton(
-              onPressed: () => _showOnlinePaymentDialog(appointment),
-              child: const Text('Pay'),
-            ),
-            isThreeLine: true,
+        actions: [
+          IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh_rounded)),
+          IconButton(
+            onPressed: () => authProvider.logout(),
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
           ),
-        );
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _fetchData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildStatusBanner(),
+                    const SizedBox(height: 24),
+                    const Text('Raccourcis', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 16,
+                      childAspectRatio: 1.1,
+                      children: [
+                        _buildMenuCard('Rendez-vous', Icons.calendar_today_rounded, Colors.blue, _appointments.length, () => _showSection('Mes Rendez-vous', _buildAppointmentsList)),
+                        _buildMenuCard('Diagnostics', Icons.description_rounded, Colors.teal, _consultations.length, () => _showSection('Mes Diagnostics', _buildConsultationsList)),
+                        _buildMenuCard('Ordonnances', Icons.medication_rounded, Colors.orange, _prescriptions.length, () => _showSection('Mes Ordonnances', _buildPrescriptionsList)),
+                        _buildMenuCard('Paiements', Icons.account_balance_wallet_rounded, Colors.red, _appointments.where((a) => a.statut == 'TERMINE' && !_payments.any((p) => p.rdvId == a.id)).length, () => _showSection('Facturation', _buildPaymentsList)),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    const Text('Dernière Activité', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    _buildRecentActivity(),
+                  ],
+                ),
+              ),
+            ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showDiagnosticRequestDialog,
+        icon: const Icon(Icons.add),
+        label: const Text('Demander un Diagnostic'),
+        backgroundColor: AppTheme.primaryTeal,
+      ),
+    );
+  }
+
+  Widget _buildStatusBanner() {
+    if (_appointments.isEmpty) return const SizedBox.shrink();
+    AppointmentModel activeAppt;
+    try {
+      activeAppt = _appointments.lastWhere((a) => a.statut == 'CONFIRME' || a.statut == 'ATTENTE', orElse: () => _appointments.first);
+    } catch (e) { return const SizedBox.shrink(); }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [AppTheme.primaryTeal, AppTheme.deepTeal]),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: AppTheme.primaryTeal.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Colors.white, size: 40),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(activeAppt.statut == 'CONFIRME' ? 'RDV Confirmé' : 'Demande en cours', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                Text('Le ${_formatDate(activeAppt.dateRdv)} ${activeAppt.medecinName != null ? "avec Dr. ${activeAppt.medecinName}" : ""}', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuCard(String title, IconData icon, Color color, int count, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.withValues(alpha: 0.1))),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color, size: 28)),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)), Text('$count éléments', style: TextStyle(color: AppTheme.mutedSlate, fontSize: 12))])
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSection(String title, Widget Function() builder) {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => Scaffold(backgroundColor: const Color(0xFFF8FAFC), appBar: AppBar(title: Text(title)), body: builder())));
+  }
+
+  Widget _buildAppointmentsList() {
+    if (_appointments.isEmpty) return const Center(child: Text('Aucun rendez-vous'));
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _appointments.length,
+      itemBuilder: (context, index) {
+        final a = _appointments[index];
+        return Card(child: ListTile(leading: Icon(a.isEmergency ? Icons.emergency : Icons.event, color: a.isEmergency ? Colors.red : AppTheme.primaryTeal), title: Text(a.motif ?? 'Diagnostic'), subtitle: Text('Statut: ${a.statut}\nDate: ${_formatDate(a.dateRdv)}')));
       },
     );
   }
-}
 
-extension _FirstOrNullExtension<E> on Iterable<E> {
-  E? get firstOrNull => isEmpty ? null : first;
+  Widget _buildConsultationsList() {
+    if (_consultations.isEmpty) return const Center(child: Text('Aucun diagnostic disponible'));
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _consultations.length,
+      itemBuilder: (context, index) {
+        final c = _consultations[index];
+        return Card(child: Column(children: [ListTile(leading: const Icon(Icons.medical_information, color: Colors.teal), title: Text(c.diagnostic), subtitle: Text('Dr. ${c.medecinName ?? "Inconnu"} - ${_formatDate(c.dateConsult)}')), Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton.icon(onPressed: () => _downloadReport(c), icon: const Icon(Icons.download), label: const Text('Télécharger PDF'))]))]));
+      },
+    );
+  }
+
+  Future<void> _downloadReport(ConsultationModel c) async {
+    final pres = _prescriptions.where((p) => p.consultationId == c.id).firstOrNull;
+    final path = await PdfService.exportFullDiagnostic(consultation: c, prescription: pres, patientName: c.patientName ?? "Patient", doctorName: c.medecinName ?? "Médecin");
+    if (path != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rapport téléchargé : $path')));
+  }
+
+  Future<void> _downloadReceipt(PaiementModel p) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final path = await PdfService.exportReceipt(payment: p, patientName: authProvider.user?.name ?? "Patient");
+    if (path != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reçu téléchargé : $path')));
+  }
+
+  Widget _buildPrescriptionsList() {
+    if (_prescriptions.isEmpty) return const Center(child: Text('Aucune ordonnance'));
+    return ListView.builder(padding: const EdgeInsets.all(16), itemCount: _prescriptions.length, itemBuilder: (context, index) { final p = _prescriptions[index]; return Card(child: ListTile(leading: const Icon(Icons.medication, color: Colors.orange), title: Text('Ordonnance #${p.id}'), subtitle: Text('Médicaments: ${p.medicaments.length}'))); });
+  }
+
+  Future<void> _payOnline(AppointmentModel appt) async {
+    if (appt.id == null) return;
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final bool? paid = await Navigator.push<bool>(context, MaterialPageRoute(builder: (context) => PaymentScreen(amount: 200, patientName: authProvider.user?.name ?? 'Patient')));
+    if (paid == true) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paiement initié avec succès. Veuillez passer à l\'accueil pour validation.'), backgroundColor: AppTheme.primaryTeal, behavior: SnackBarBehavior.floating));
+    }
+  }
+
+  Widget _buildPaymentsList() {
+    final pending = _appointments.where((a) => a.statut == 'TERMINE' && !_payments.any((p) => p.rdvId == a.id)).toList();
+    
+    if (pending.isEmpty && _payments.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.receipt_long, size: 80, color: AppTheme.mutedSlate),
+            const SizedBox(height: 20),
+            const Text('Aucun paiement à effectuer', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Vos factures apparaîtront ici une fois la consultation terminée.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.mutedSlate)),
+            const SizedBox(height: 30),
+            ElevatedButton(onPressed: _fetchData, child: const Text('Actualiser')),
+          ],
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (pending.isNotEmpty) ...[
+          const Text('À régler', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 10),
+          ...pending.map((a) => Card(color: Colors.red.shade50, child: ListTile(title: const Text('Consultation médicale'), subtitle: Text('Dr. ${a.medecinName ?? "Généraliste"} - 200 MAD'), trailing: ElevatedButton(onPressed: () => _payOnline(a), style: ElevatedButton.styleFrom(minimumSize: const Size(80, 40)), child: const Text('Payer'))))),
+          const SizedBox(height: 20),
+        ],
+        const Text('Historique', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 10),
+        if (_payments.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun historique de paiement.', style: TextStyle(color: Colors.grey, fontSize: 13))),
+        ..._payments.map((p) => Card(child: Column(children: [ListTile(leading: const Icon(Icons.check_circle, color: Colors.green), title: Text('${p.montant} MAD'), subtitle: Text('Payé le ${_formatDate(p.datePaiement)}')), Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton.icon(onPressed: () => _downloadReceipt(p), icon: const Icon(Icons.download), label: const Text('Télécharger Reçu'))]))]))),
+      ],
+    );
+  }
+
+  Widget _buildRecentActivity() {
+    if (_appointments.isEmpty) return const Text('Aucune activité récente');
+    final latest = _appointments.last;
+    return Card(child: ListTile(leading: Icon(latest.statut == 'CONFIRME' ? Icons.check_circle : Icons.pending, color: latest.statut == 'CONFIRME' ? Colors.green : Colors.orange), title: Text(latest.motif ?? 'Demande de diagnostic'), subtitle: Text('Status: ${latest.statut}'), trailing: const Icon(Icons.chevron_right)));
+  }
 }

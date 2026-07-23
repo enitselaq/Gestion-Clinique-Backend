@@ -40,7 +40,6 @@ class Patient(models.Model):
 
     @property
     def age(self):
-        """Calculates age automatically based on current date"""
         today = date.today()
         return today.year - self.date_naissance.year - (
             (today.month, today.day) < (self.date_naissance.month, self.date_naissance.day)
@@ -49,28 +48,37 @@ class Patient(models.Model):
     def __str__(self):
         return f"Patient: {self.user.last_name} ({self.cin})"
 
-# 4. RENDEZ-VOUS MODEL (Scheduling Logic)
+# 4. RECEPTIONNISTE PROXY
+class Receptionniste(Utilisateur):
+    class Meta:
+        proxy = True
+        verbose_name = "Réceptionniste"
+        verbose_name_plural = "Réceptionnistes"
+
+# 5. RENDEZ-VOUS MODEL (Updated with Motif and Emergency)
 class RendezVous(models.Model):
     STATUS_CHOICES = (
-        ('CONFIRME', 'Confirme'),
-        ('ANNULE', 'Annule'),
-        ('TERMINE', 'Termine'),
         ('ATTENTE', 'En attente'),
+        ('CONFIRME', 'Confirmé'),
+        ('ARRIVE', 'Arrivé'),
+        ('ANNULE', 'Annulé'),
+        ('TERMINE', 'Terminé'),
     )
-    date_rdv = models.DateTimeField(db_index=True) # Optimized for searching
+    date_rdv = models.DateTimeField(db_index=True)
     statut = models.CharField(max_length=10, choices=STATUS_CHOICES, default='ATTENTE')
-    # related_name allows: patient.rendez_vous.all() in Flutter API
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='rendez_vous')
-    medecin = models.ForeignKey(Medecin, on_delete=models.SET_NULL, null=True, related_name='rendez_vous')
-    cree_par = models.ForeignKey(Utilisateur, on_delete=models.SET_NULL, null=True)
+    medecin = models.ForeignKey(Medecin, on_delete=models.SET_NULL, null=True, blank=True, related_name='rendez_vous')
+    cree_par = models.ForeignKey(Utilisateur, on_delete=models.SET_NULL, null=True, blank=True)
+    motif = models.TextField(blank=True, null=True) # <--- Symptoms or reason
+    is_emergency = models.BooleanField(default=False) # <--- Ambulance case
 
     class Meta:
-        ordering = ['-date_rdv'] # Shows newest appointments first
+        ordering = ['-is_emergency', 'date_rdv']
 
     def __str__(self):
-        return f"RDV {self.date_rdv.strftime('%d/%m/%Y %H:%M')} - {self.patient.user.last_name}"
+        return f"{'EMERGENCY ' if self.is_emergency else ''}RDV {self.date_rdv.strftime('%d/%m/%Y %H:%M')}"
 
-# 5. CONSULTATION MODEL (Medical Act)
+# ... (rest of the models remain same)
 class Consultation(models.Model):
     diagnostic = models.TextField()
     notes = models.TextField(blank=True)
@@ -78,42 +86,40 @@ class Consultation(models.Model):
     rdv = models.OneToOneField(RendezVous, on_delete=models.CASCADE, related_name='consultation')
     medecin = models.ForeignKey(Medecin, on_delete=models.CASCADE, related_name='consultations')
 
-    def __str__(self):
-        return f"Consultation {self.id} - {self.medecin.user.last_name}"
-
-# 6. PAIEMENT MODEL (Financial Tracking)
 class Paiement(models.Model):
     montant = models.DecimalField(max_digits=10, decimal_places=2)
     date_paiement = models.DateTimeField(auto_now_add=True)
     rdv = models.OneToOneField(RendezVous, on_delete=models.CASCADE, related_name='paiement')
 
-    def __str__(self):
-        return f"Paiement {self.montant} DH - RDV #{self.rdv.id}"
-
-# 7. ORDONNANCE MODEL (Prescription Header)
 class Ordonnance(models.Model):
     consultation = models.OneToOneField(Consultation, on_delete=models.CASCADE, related_name='ordonnance')
     date_creation = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"Ordonnance #{self.id} - {self.consultation.rdv.patient.user.last_name}"
-
-# 8. MEDICAMENT MODEL (Prescription Details)
 class Medicament(models.Model):
     ordonnance = models.ForeignKey(Ordonnance, on_delete=models.CASCADE, related_name='medicaments')
     nom_generique = models.CharField(max_length=100)
     dosage = models.CharField(max_length=100)
     instructions = models.TextField(blank=True)
 
+
+class Notification(models.Model):
+    """Simple notification model to record messages sent to users.
+
+    Use a DB-backed notification so the frontends can poll or show history.
+    """
+    user = models.ForeignKey(Utilisateur, on_delete=models.CASCADE, related_name='notifications')
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
     def __str__(self):
-        return self.nom_generique
-    
+        return f"Notification to {self.user.username} at {self.created_at.isoformat()}"
 
 @receiver(post_save, sender=Utilisateur)
 def create_profile(sender, instance, created, **kwargs):
     if created:
         if instance.role == 'MEDECIN':
-            # We keep this because Admins usually create Doctors 
-            # without extra profile info initially.
             Medecin.objects.get_or_create(user=instance)
-

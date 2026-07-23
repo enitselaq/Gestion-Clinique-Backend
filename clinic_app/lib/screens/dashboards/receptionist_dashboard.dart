@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:dio/dio.dart';
+import '../../core/app_theme.dart';
 import '../../models/appointment_model.dart';
-import '../../models/paiement_model.dart';
 import '../../models/doctor_model.dart';
+import '../../models/paiement_model.dart';
 import '../../models/patient_model.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/locale_provider.dart';
 import '../../services/appointment_service.dart';
 import '../../services/payment_service.dart';
 import '../../services/user_service.dart';
-import '../../services/pdf_service.dart';
-import '../../widgets/password_dialogs.dart';
+import '../notifications_screen.dart';
 
 class ReceptionistDashboard extends StatefulWidget {
   const ReceptionistDashboard({super.key});
@@ -20,16 +22,13 @@ class ReceptionistDashboard extends StatefulWidget {
 
 class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
   final AppointmentService _appointmentService = AppointmentService();
-  final PaymentService _paymentService = PaymentService();
   final UserService _userService = UserService();
-  final TextEditingController _searchController = TextEditingController();
+  final PaymentService _paymentService = PaymentService();
 
   List<AppointmentModel> _appointments = [];
   List<PatientModel> _patients = [];
   List<DoctorModel> _doctors = [];
-  List<PaiementModel> _payments = [];
   bool _isLoading = true;
-  String _searchQuery = '';
 
   @override
   void initState() {
@@ -37,312 +36,78 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
     _fetchData();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
   Future<void> _fetchData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
-    final errors = <String>[];
     try {
-      List<AppointmentModel> appointments = [];
-      List<PatientModel> patients = [];
-      List<DoctorModel> doctors = [];
-
-      try {
-        appointments = await _appointmentService.getAppointments();
-      } catch (e) {
-        errors.add('appointments');
-      }
-
-      try {
-        patients = await _userService.getPatients();
-      } catch (e) {
-        errors.add('patients');
-      }
-
-      try {
-        doctors = await _userService.getMedecins();
-      } catch (e) {
-        errors.add('doctors');
-      }
-
-      List<PaiementModel> payments = [];
-      try {
-        payments = await _paymentService.getPayments();
-      } catch (e) {
-        errors.add('payments');
-      }
-
+      final results = await Future.wait([
+        _appointmentService.getAppointments(),
+        _userService.getPatients(),
+        _userService.getMedecins(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _appointments = appointments;
-        _patients = patients;
-        _doctors = doctors;
-        _payments = payments;
+        _appointments = results[0] as List<AppointmentModel>;
+        _patients = results[1] as List<PatientModel>;
+        _doctors = results[2] as List<DoctorModel>;
         _isLoading = false;
       });
-      if (errors.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Some data could not be loaded: ${errors.join(', ')}',
-            ),
-          ),
-        );
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error fetching data: $e')));
     }
   }
 
-  List<AppointmentModel> get _filteredAppointments {
-    final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) return _appointments;
-    return _appointments.where((appt) {
-      final patientName = (appt.patientName ?? '').toLowerCase();
-      final doctorName = (appt.medecinName ?? '').toLowerCase();
-      final dateLabel = appt.dateRdv
-          .toLocal()
-          .toIso8601String()
-          .split('T')[0]
-          .toLowerCase();
-      final status = appt.statut.toLowerCase();
-      return patientName.contains(query) ||
-          doctorName.contains(query) ||
-          dateLabel.contains(query) ||
-          status.contains(query);
-    }).toList();
-  }
-
-  List<PatientModel> get _filteredPatients {
-    final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) return _patients;
-    return _patients.where((patient) {
-      final fullName = patient.fullName.toLowerCase();
-      final cin = (patient.cin ?? '').toLowerCase();
-      final birthDate =
-          patient.dateNaissance
-              ?.toIso8601String()
-              .split('T')[0]
-              .toLowerCase() ??
-          '';
-      return fullName.contains(query) ||
-          cin.contains(query) ||
-          birthDate.contains(query);
-    }).toList();
-  }
-
-  Map<int, PaiementModel> get _paymentsByAppointmentId {
-    return {
-      for (final payment in _payments) payment.rdvId: payment,
-    };
-  }
-
-  List<AppointmentModel> get _pendingPaymentAppointments {
-    final paymentsByAppointmentId = _paymentsByAppointmentId;
-    return _appointments.where((appt) {
-      final query = _searchQuery.trim().toLowerCase();
-      final matchesSearch =
-          query.isEmpty ||
-          (appt.patientName ?? '').toLowerCase().contains(query) ||
-          (appt.medecinName ?? '').toLowerCase().contains(query) ||
-          appt.dateRdv.toLocal().toIso8601String().split('T')[0].contains(query);
-      return matchesSearch &&
-          appt.id != null &&
-          appt.statut == 'TERMINE' &&
-          !paymentsByAppointmentId.containsKey(appt.id);
-    }).toList();
-  }
-
-  List<PaiementModel> get _filteredPayments {
-    final appointmentsById = {
-      for (final appt in _appointments)
-        if (appt.id != null) appt.id!: appt,
-    };
-    final query = _searchQuery.trim().toLowerCase();
-    final filtered = _payments.where((payment) {
-      if (query.isEmpty) return true;
-      final appt = appointmentsById[payment.rdvId];
-      return (appt?.patientName ?? '').toLowerCase().contains(query) ||
-          (appt?.medecinName ?? '').toLowerCase().contains(query) ||
-          payment.montant.toString().toLowerCase().contains(query);
-    }).toList();
-    filtered.sort((a, b) {
-      final aDate = a.datePaiement ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bDate = b.datePaiement ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return bDate.compareTo(aDate);
-    });
-    return filtered;
-  }
-
-  void _showLogoutConfirmation(BuildContext context) {
+  Future<void> _showConfirmationDialog(AppointmentModel appt) async {
+    DoctorModel? selectedDoctor;
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              Provider.of<AuthProvider>(context, listen: false).logout();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showPatientDetailsDialog(PatientModel patient) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        return AlertDialog(
-          title: Text(
-            patient.fullName,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: theme.colorScheme.onSurface,
-            ),
-          ),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _infoRow(dialogContext, 'CIN', patient.cin ?? 'N/A'),
-                        _infoRow(
-                          dialogContext,
-                          'Birth date',
-                          patient.dateNaissance
-                                  ?.toIso8601String()
-                                  .split('T')[0] ??
-                              'N/A',
-                        ),
-                        _infoRow(dialogContext, 'Sex', patient.sexe ?? 'N/A'),
-                        _infoRow(
-                          dialogContext,
-                          'Age',
-                          patient.age?.toString() ?? 'N/A',
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _buildInfoSection(
-                    dialogContext,
-                    title: 'Medical history',
-                    value: patient.antecedents.trim().isEmpty
-                        ? 'No history recorded'
-                        : patient.antecedents,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildInfoSection(
-                    dialogContext,
-                    title: 'Allergies',
-                    value: patient.allergies.trim().isEmpty
-                        ? 'No allergies recorded'
-                        : patient.allergies,
-                  ),
-                ],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Confirmer & Assigner'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Patient: ${appt.patientName}'),
+              const SizedBox(height: 20),
+              DropdownButtonFormField<DoctorModel>(
+                decoration: const InputDecoration(labelText: 'Choisir le Médecin'),
+                items: _doctors.map((d) => DropdownMenuItem(value: d, child: Text('Dr. ${d.fullName}'))).toList(),
+                onChanged: (val) => setDialogState(() => selectedDoctor = val),
               ),
-            ),
+            ],
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
-  }
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            ElevatedButton(
+              onPressed: selectedDoctor == null ? null : () async {
+                try {
+                  await _appointmentService.assignDoctor(appt.id!, selectedDoctor!.userId);
+                  if (!context.mounted) return;
+                  Navigator.pop(context);
+                  _fetchData();
+                } catch (e) {
+                  debugPrint('Error assigning doctor / confirming appointment: $e');
+                  if (!context.mounted) return;
+                  String message = 'Erreur: impossible de confirmer/assigner le rendez-vous.';
+                  // If DioException, try to extract server message
+                  try {
+                    if (e is DioException) {
+                      final resp = e.response?.data;
+                      if (resp is Map && resp.containsKey('detail')) {
+                        message = resp['detail'].toString();
+                      } else if (resp != null) {
+                        message = resp.toString();
+                      }
+                    }
+                  } catch (_) {}
 
-  Widget _buildInfoSection(
-    BuildContext context, {
-    required String title,
-    required String value,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: theme.colorScheme.onSurface,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            border: Border.all(color: theme.dividerColor),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface,
-              height: 1.35,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _infoRow(BuildContext context, String label, String value) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(
-              text: '$label: ',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: theme.colorScheme.onSurface,
-              ),
-            ),
-            TextSpan(
-              text: value,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface,
-              ),
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(message)),
+                  );
+                }
+              },
+              child: const Text('Confirmer'),
             ),
           ],
         ),
@@ -350,546 +115,409 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
     );
   }
 
-  Future<void> _showDeleteAppointmentDialog(AppointmentModel appt) async {
-    if (appt.id == null) return;
+  Future<void> _checkInPatient(AppointmentModel appt) async {
+    try {
+      await _appointmentService.updateAppointmentStatus(appt.id!, 'ARRIVE');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${appt.patientName} est maintenant en salle d\'attente.')),
+      );
+      _fetchData();
+    } catch (e) {
+      debugPrint('Error during check-in: $e');
+    }
+  }
+
+  Future<void> _deleteAppointment(AppointmentModel appt) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete appointment'),
-        content: Text(
-          'Delete the appointment of ${appt.patientName ?? 'this patient'}?',
-        ),
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer le rendez-vous'),
+        content: Text('Voulez-vous vraiment supprimer le rendez-vous de ${appt.patientName ?? "ce patient"} ?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
           ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Supprimer'),
           ),
         ],
       ),
     );
-
-    if (confirmed != true) return;
-
-    try {
-      await _appointmentService.deleteAppointment(appt.id!);
-      if (!mounted) return;
-      _fetchData();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Appointment deleted successfully')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete appointment: $e')),
-      );
+    if (confirmed == true) {
+      try {
+        await _appointmentService.deleteAppointment(appt.id!);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Rendez-vous supprimé.')),
+        );
+        _fetchData();
+      } catch (e) {
+        debugPrint('Error deleting appointment: $e');
+      }
     }
   }
 
-  void _showCreateOrEditAppointmentDialog({AppointmentModel? appointment}) {
-    final isEditing = appointment != null;
-    final formKey = GlobalKey<FormState>();
-    int? patientId = appointment?.patientId;
-    int? doctorId = appointment?.medecinId;
-    DateTime selectedDate = (appointment?.dateRdv ?? DateTime.now()).toLocal();
-    TimeOfDay selectedTime = TimeOfDay.fromDateTime(
-      (appointment?.dateRdv ?? DateTime.now()).toLocal(),
-    );
-    String statut = appointment?.statut ?? 'ATTENTE';
-
-    showDialog(
+  Future<void> _showPaymentDialog(AppointmentModel appt) async {
+    final amountController = TextEditingController(text: '200');
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(isEditing ? 'Edit Appointment' : 'New Appointment'),
-          content: SizedBox(
-            width: 420,
-            child: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<int>(
-                      decoration: const InputDecoration(labelText: 'Patient'),
-                      initialValue: patientId,
-                      items: _patients
-                          .map(
-                            (p) => DropdownMenuItem<int>(
-                              value: p.userId,
-                              child: Text(p.fullName),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => patientId = v,
-                      validator: (v) => v == null ? 'Required' : null,
-                    ),
-                    DropdownButtonFormField<int>(
-                      decoration: const InputDecoration(labelText: 'Doctor'),
-                      initialValue: doctorId,
-                      items: _doctors
-                          .map(
-                            (d) => DropdownMenuItem<int>(
-                              value: d.userId,
-                              child: Text(d.fullName),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => doctorId = v,
-                      validator: (v) => v == null ? 'Required' : null,
-                    ),
-                    DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(labelText: 'Status'),
-                      initialValue: statut,
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'ATTENTE',
-                          child: Text('Waiting'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'CONFIRME',
-                          child: Text('Confirmed'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'ANNULE',
-                          child: Text('Cancelled'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'TERMINE',
-                          child: Text('Completed'),
-                        ),
-                      ],
-                      onChanged: (v) =>
-                          setDialogState(() => statut = v ?? statut),
-                    ),
-                    ListTile(
-                      title: Text(
-                        'Date: ${selectedDate.toIso8601String().split('T')[0]}',
-                      ),
-                      trailing: const Icon(Icons.calendar_today),
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: selectedDate,
-                          firstDate: DateTime.now(),
-                          lastDate: DateTime.now().add(
-                            const Duration(days: 365),
-                          ),
-                        );
-                        if (picked != null) {
-                          setDialogState(() => selectedDate = picked);
-                        }
-                      },
-                    ),
-                    ListTile(
-                      title: Text('Time: ${selectedTime.format(context)}'),
-                      trailing: const Icon(Icons.access_time),
-                      onTap: () async {
-                        final picked = await showTimePicker(
-                          context: context,
-                          initialTime: selectedTime,
-                        );
-                        if (picked != null) {
-                          setDialogState(() => selectedTime = picked);
-                        }
-                      },
-                    ),
-                  ],
-                ),
+      builder: (context) => AlertDialog(
+        title: const Text('Enregistrer un paiement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Patient: ${appt.patientName ?? "N/A"}'),
+            const SizedBox(height: 8),
+            Text('Date RDV: ${appt.dateRdv.toString().substring(0, 10)}'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Montant (MAD)',
+                prefixIcon: Icon(Icons.money),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (formKey.currentState!.validate()) {
-                  final dateTime = DateTime(
-                    selectedDate.year,
-                    selectedDate.month,
-                    selectedDate.day,
-                    selectedTime.hour,
-                    selectedTime.minute,
-                  );
-
-                  try {
-                    if (isEditing && appointment.id != null) {
-                      await _appointmentService
-                          .updateAppointment(appointment.id!, {
-                            'patient': patientId!,
-                            'medecin': doctorId,
-                            'date_rdv': dateTime.toIso8601String(),
-                            'statut': statut,
-                          });
-                    } else {
-                      await _appointmentService.createAppointment(
-                        AppointmentModel(
-                          patientId: patientId!,
-                          medecinId: doctorId,
-                          dateRdv: dateTime,
-                          statut: statut,
-                        ),
-                      );
-                    }
-                    if (!dialogContext.mounted) return;
-                    Navigator.pop(dialogContext);
-                    _fetchData();
-                  } catch (e) {
-                    if (!dialogContext.mounted) return;
-                    ScaffoldMessenger.of(dialogContext).showSnackBar(
-                      SnackBar(content: Text('Failed to save appointment: $e')),
-                    );
-                  }
-                }
-              },
-              child: Text(isEditing ? 'Save' : 'Schedule'),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showPaymentDialog(AppointmentModel appt) {
-    final formKey = GlobalKey<FormState>();
-    final controller = TextEditingController();
-    final defaultAmount = 200.0;
-    controller.text = defaultAmount.toStringAsFixed(2);
-    double montant = defaultAmount;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Register Payment for ${appt.patientName}'),
-        content: SizedBox(
-          width: 420,
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _infoRow(dialogContext, 'Patient', appt.patientName ?? 'N/A'),
-                _infoRow(
-                  dialogContext,
-                  'Doctor',
-                  appt.medecinName != null ? 'Dr. ${appt.medecinName}' : 'N/A',
-                ),
-                _infoRow(
-                  dialogContext,
-                  'Appointment',
-                  appt.dateRdv
-                      .toLocal()
-                      .toIso8601String()
-                      .replaceFirst('T', ' ')
-                      .substring(0, 16),
-                ),
-                _infoRow(dialogContext, 'Status', appt.statut),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: controller,
-                  decoration: const InputDecoration(
-                    labelText: 'Amount',
-                    prefixText: 'MAD ',
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  onChanged: (v) => montant = double.tryParse(v) ?? 0,
-                  validator: (v) => (double.tryParse(v ?? '') ?? 0) <= 0
-                      ? 'Invalid amount'
-                      : null,
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'This payment is recorded after the doctor completes the consultation.',
-                ),
-              ],
-            ),
-          ),
-        ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
           ElevatedButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate() || appt.id == null) return;
-              final payment = await _paymentService.createPayment(
-                PaiementModel(rdvId: appt.id!, montant: montant),
-              );
-              if (!dialogContext.mounted) return;
-              Navigator.pop(dialogContext);
-
-              await PdfService.exportReceipt(
-                payment: payment,
-                patientName: appt.patientName ?? '',
-              );
-              _fetchData();
+            onPressed: () {
+              final amount = double.tryParse(amountController.text);
+              if (amount != null && amount > 0) {
+                Navigator.pop(context, true);
+              }
             },
-            child: const Text('Pay & Complete'),
+            child: const Text('Enregistrer'),
           ),
         ],
       ),
     );
-  }
-
-  Widget _buildAppointmentsTab() {
-    final appointments = _filteredAppointments;
-    final paymentsByAppointmentId = _paymentsByAppointmentId;
-    if (appointments.isEmpty) {
-      return const Center(child: Text('No appointments found'));
-    }
-
-    return ListView.builder(
-      itemCount: appointments.length,
-      itemBuilder: (context, index) {
-        final appt = appointments[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: ListTile(
-            title: Text(
-              '${appt.patientName ?? 'Patient #${appt.patientId}'} - ${appt.medecinName != null ? 'Dr. ${appt.medecinName}' : 'No doctor'}',
-            ),
-            subtitle: Text(
-              '${appt.dateRdv.toLocal().toIso8601String().replaceFirst('T', ' ').substring(0, 16)}\n'
-              'Status: ${appt.statut} | Payment: ${appt.id != null && paymentsByAppointmentId.containsKey(appt.id) ? 'Paid' : 'Not paid'}',
-            ),
-            trailing: PopupMenuButton<_RdvAction>(
-              onSelected: (action) async {
-                if (appt.id == null) return;
-                switch (action) {
-                  case _RdvAction.edit:
-                    _showCreateOrEditAppointmentDialog(appointment: appt);
-                    return;
-                  case _RdvAction.confirm:
-                    await _appointmentService.updateAppointmentStatus(
-                      appt.id!,
-                      'CONFIRME',
-                    );
-                    _fetchData();
-                    return;
-                  case _RdvAction.cancel:
-                    await _appointmentService.updateAppointmentStatus(
-                      appt.id!,
-                      'ANNULE',
-                    );
-                    _fetchData();
-                    return;
-                  case _RdvAction.delete:
-                    _showDeleteAppointmentDialog(appt);
-                    return;
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: _RdvAction.edit,
-                  child: Text('Edit'),
-                ),
-                if (appt.statut == 'ATTENTE')
-                  const PopupMenuItem(
-                    value: _RdvAction.confirm,
-                    child: Text('Confirm'),
-                  ),
-                if (appt.statut != 'ANNULE' && appt.statut != 'TERMINE')
-                  const PopupMenuItem(
-                    value: _RdvAction.cancel,
-                    child: Text('Cancel'),
-                  ),
-                const PopupMenuItem(
-                  value: _RdvAction.delete,
-                  child: Text('Delete'),
-                ),
-              ],
-            ),
-            isThreeLine: true,
-          ),
+    if (confirmed == true) {
+      try {
+        final amount = double.tryParse(amountController.text) ?? 200;
+        await _paymentService.createPayment(
+          PaiementModel(rdvId: appt.id!, montant: amount),
         );
-      },
-    );
-  }
-
-  Widget _buildPatientsTab() {
-    final patients = _filteredPatients;
-    if (patients.isEmpty) {
-      return const Center(child: Text('No patients found'));
-    }
-
-    return ListView.builder(
-      itemCount: patients.length,
-      itemBuilder: (context, index) {
-        final patient = patients[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.person_outline)),
-            title: Text(patient.fullName),
-            subtitle: Text(
-              'CIN: ${patient.cin ?? 'N/A'}\n'
-              'Birth date: ${patient.dateNaissance != null ? patient.dateNaissance!.toIso8601String().split('T')[0] : 'N/A'} - '
-              'Sex: ${patient.sexe ?? 'N/A'} - Age: ${patient.age ?? 'N/A'}',
-            ),
-            onTap: () => _showPatientDetailsDialog(patient),
-            trailing: const Icon(Icons.chevron_right),
-            isThreeLine: true,
-          ),
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Paiement enregistré avec succès.'), backgroundColor: AppTheme.primaryTeal),
         );
-      },
-    );
-  }
-
-  Widget _buildPaymentsTab() {
-    final pendingAppointments = _pendingPaymentAppointments;
-    final payments = _filteredPayments;
-    final appointmentsById = {
-      for (final appt in _appointments)
-        if (appt.id != null) appt.id!: appt,
-    };
-
-    if (pendingAppointments.isEmpty && payments.isEmpty) {
-      return const Center(child: Text('No payment data found'));
+      } catch (e) {
+        debugPrint('Error recording payment: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erreur lors de l\'enregistrement du paiement.'), backgroundColor: Colors.redAccent),
+        );
+      }
     }
-
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(
-            'Pending payments',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-        ),
-        if (pendingAppointments.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text('No completed appointments waiting for payment'),
-          ),
-        ...pendingAppointments.map((appt) {
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.payments_outlined)),
-              title: Text(appt.patientName ?? 'Patient #${appt.patientId}'),
-              subtitle: Text(
-                '${appt.medecinName != null ? 'Dr. ${appt.medecinName}' : 'No doctor'}\n'
-                '${appt.dateRdv.toLocal().toIso8601String().replaceFirst('T', ' ').substring(0, 16)}',
-              ),
-              trailing: ElevatedButton(
-                onPressed: () => _showPaymentDialog(appt),
-                child: const Text('Pay'),
-              ),
-              isThreeLine: true,
-            ),
-          );
-        }),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: Text(
-            'Payment history',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-        ),
-        if (payments.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text('No payments recorded yet'),
-          ),
-        ...payments.map((payment) {
-          final appt = appointmentsById[payment.rdvId];
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.receipt_long)),
-              title: Text(appt?.patientName ?? 'Appointment #${payment.rdvId}'),
-              subtitle: Text(
-                'Amount: MAD ${payment.montant.toStringAsFixed(2)}\n'
-                'Paid on: ${payment.datePaiement?.toLocal().toIso8601String().replaceFirst('T', ' ').substring(0, 16) ?? 'N/A'}',
-              ),
-              isThreeLine: true,
-            ),
-          );
-        }),
-      ],
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Receptionist Dashboard'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Appointments'),
-              Tab(text: 'Patients'),
-              Tab(text: 'Payments'),
-            ],
-          ),
-          actions: [
-            IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh)),
-            IconButton(
-              onPressed: () => showChangePasswordDialog(context),
-              icon: const Icon(Icons.lock_reset),
-              tooltip: 'Change password',
-            ),
-            IconButton(
-              onPressed: () => _showLogoutConfirmation(context),
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-            ),
+    final localeProvider = Provider.of<LocaleProvider>(context);
+    final authProvider = Provider.of<AuthProvider>(context);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bonjour, ${authProvider.user?.username ?? 'Receptionniste'}', style: const TextStyle(fontSize: 14, color: AppTheme.mutedSlate)),
+            const Text('Espace Réception', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ],
         ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.search),
-                  hintText: 'Search patients, appointments or dates',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onChanged: (value) => setState(() => _searchQuery = value),
-              ),
-            ),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : TabBarView(
+        actions: [
+          _buildLanguageSmallToggle(localeProvider),
+          IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen())), icon: const Icon(Icons.notifications_none_rounded)),
+          IconButton(onPressed: _fetchData, icon: const Icon(Icons.refresh_rounded)),
+          IconButton(
+            onPressed: () => Provider.of<AuthProvider>(context, listen: false).logout(),
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _fetchData,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildStatusBanner(),
+                    const SizedBox(height: 18),
+                    const Text('Raccourcis', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 1.1,
                       children: [
-                        _buildAppointmentsTab(),
-                        _buildPatientsTab(),
-                        _buildPaymentsTab(),
+                        _buildMenuCard('Rendez-vous', Icons.calendar_today_rounded, Colors.blue, _appointments.length, () => _showSection('Rendez-vous', _buildAppointmentsList())),
+                        _buildMenuCard('Patients', Icons.people, Colors.indigo, _patients.length, () => _showSection('Patients', _buildPatientsList())),
+                        _buildMenuCard('Médecins', Icons.person_search, Colors.teal, _doctors.length, () => _showSection('Médecins', _buildDoctorsList())),
+                        _buildMenuCard('Arrivées', Icons.login_rounded, Colors.orange, _appointments.where((a) => a.statut == 'CONFIRME').length, () => _showSection('En Attente', _buildAppointmentsList())),
+                        _buildMenuCard('Paiements', Icons.account_balance_wallet_rounded, Colors.green, 0, () => _showSection('Paiements', _buildPaymentsList())),
                       ],
                     ),
+                    const SizedBox(height: 20),
+                    const Text('Demandes récentes', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    SizedBox(height: 400, child: _buildAppointmentsList()),
+                  ],
+                ),
+              ),
             ),
+    );
+  }
+
+  Widget _buildStatusBanner() {
+    if (_appointments.isEmpty) return const SizedBox.shrink();
+
+    AppointmentModel activeAppt;
+    try {
+      activeAppt = _appointments.firstWhere((a) => a.statut == 'ATTENTE' || a.statut == 'CONFIRME', orElse: () => _appointments.first);
+    } catch (e) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [AppTheme.primaryTeal, AppTheme.deepTeal]),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: AppTheme.primaryTeal.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 3))],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Colors.white, size: 36),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(activeAppt.statut == 'CONFIRME' ? 'RDV Confirmé' : 'Nouvelle demande', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                Text('${activeAppt.patientName ?? 'Patient'} - ${activeAppt.dateRdv.toString().substring(0, 10)}', style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: 13)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuCard(String title, IconData icon, Color color, int count, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.withValues(alpha: 0.08))),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color, size: 26)),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)), Text('$count éléments', style: TextStyle(color: AppTheme.mutedSlate, fontSize: 12))])
           ],
-        ),
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: () => _showCreateOrEditAppointmentDialog(),
-          icon: const Icon(Icons.add),
-          label: const Text('New Appointment'),
         ),
       ),
     );
   }
-}
 
-enum _RdvAction { edit, confirm, cancel, delete }
+  void _showSection(String title, Widget content) {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => Scaffold(appBar: AppBar(title: Text(title)), body: content)));
+  }
+
+  Widget _buildDoctorsList() {
+    return ListView.builder(padding: const EdgeInsets.all(12), itemCount: _doctors.length, itemBuilder: (context, index) {final d = _doctors[index]; return Card(child: ListTile(leading: const CircleAvatar(child: Icon(Icons.person)), title: Text(d.fullName), subtitle: Text(d.specialite ?? '')));});
+  }
+
+  Widget _buildLanguageSmallToggle(LocaleProvider provider) {
+    return Row(
+      children: [
+        _langBtn('FR', const Locale('fr'), provider),
+        _langBtn('AR', const Locale('ar'), provider),
+      ],
+    );
+  }
+
+  Widget _langBtn(String label, Locale loc, LocaleProvider provider) {
+    final isSel = provider.locale.languageCode == loc.languageCode;
+    return GestureDetector(
+      onTap: () => provider.setLocale(loc),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        decoration: BoxDecoration(
+          color: isSel ? AppTheme.primaryTeal.withValues(alpha: 0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(label, style: TextStyle(fontSize: 12, fontWeight: isSel ? FontWeight.bold : FontWeight.normal, color: isSel ? AppTheme.primaryTeal : AppTheme.mutedSlate)),
+      ),
+    );
+  }
+
+  Widget _buildAppointmentsList() {
+    if (_appointments.isEmpty) return const Center(child: Text('Aucune demande enregistrée.'));
+    
+    // Sort so Pending and Confirmed (not arrived) are at top
+    final sortedAppts = List<AppointmentModel>.from(_appointments);
+    sortedAppts.sort((a, b) {
+      if (a.statut == 'ATTENTE') return -1;
+      if (b.statut == 'ATTENTE') return 1;
+      return 0;
+    });
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: sortedAppts.length,
+      itemBuilder: (context, index) {
+        final appt = sortedAppts[index];
+        final isEm = appt.isEmergency;
+        
+        return Card(
+          child: ExpansionTile(
+            leading: CircleAvatar(
+              backgroundColor: (isEm ? Colors.red : _getStatusColor(appt.statut)).withValues(alpha: 0.1),
+              child: Icon(
+                isEm ? Icons.emergency : _getStatusIcon(appt.statut),
+                color: isEm ? Colors.red : _getStatusColor(appt.statut),
+              ),
+            ),
+            title: Text(appt.patientName ?? 'Patient Anonyme', style: TextStyle(fontWeight: FontWeight.bold, color: isEm ? Colors.red : null)),
+            subtitle: Text('Status: ${appt.statut} - ${appt.dateRdv.toString().substring(0, 10)}'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (isEm) const Padding(
+                      padding: EdgeInsets.only(bottom: 8.0),
+                      child: Text('🚑 URGENCE / AMBULANCE', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                    ),
+                    const Text('Motif:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(appt.motif ?? 'Non spécifié'),
+                    const SizedBox(height: 12),
+                    if (appt.medecinName != null) Text('Médecin: Dr. ${appt.medecinName}', style: const TextStyle(fontStyle: FontStyle.italic)),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (appt.statut == 'ATTENTE')
+                          ElevatedButton.icon(
+                            onPressed: () => _showConfirmationDialog(appt),
+                            icon: const Icon(Icons.check_circle_outline),
+                            label: const Text('Confirmer'),
+                          ),
+                        if (appt.statut == 'CONFIRME')
+                          ElevatedButton.icon(
+                            onPressed: () => _checkInPatient(appt),
+                            icon: const Icon(Icons.login_rounded),
+                            label: const Text('Enregistrer Arrivée'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                          ),
+                        if (appt.statut == 'ARRIVE')
+                          const Chip(label: Text('En Salle d\'Attente'), backgroundColor: Colors.orangeAccent, labelStyle: TextStyle(color: Colors.white)),
+                        if (appt.statut == 'TERMINE')
+                          ElevatedButton.icon(
+                            onPressed: () => _showPaymentDialog(appt),
+                            icon: const Icon(Icons.payment),
+                            label: const Text('Paiement'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                          ),
+                        if (appt.statut == 'ANNULE')
+                          const Chip(label: Text('Annulé'), backgroundColor: Colors.redAccent, labelStyle: TextStyle(color: Colors.white)),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () => _deleteAppointment(appt),
+                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                          tooltip: 'Supprimer',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              )
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPaymentsList() {
+    final completed = _appointments.where((a) => a.statut == 'TERMINE').toList();
+    if (completed.isEmpty) {
+      return const Center(child: Text('Aucune consultation terminée à facturer.'));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: completed.length,
+      itemBuilder: (context, index) {
+        final appt = completed[index];
+        return Card(
+          child: ListTile(
+            leading: const CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.payment, color: Colors.white)),
+            title: Text(appt.patientName ?? 'Patient'),
+            subtitle: Text('RDV: ${appt.dateRdv.toString().substring(0, 10)}'),
+            trailing: ElevatedButton.icon(
+              onPressed: () => _showPaymentDialog(appt),
+              icon: const Icon(Icons.add_card),
+              label: const Text('Enregistrer'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'ATTENTE': return Icons.hourglass_empty;
+      case 'CONFIRME': return Icons.event_available;
+      case 'ARRIVE': return Icons.airline_seat_recline_normal;
+      case 'TERMINE': return Icons.task_alt;
+      case 'ANNULE': return Icons.cancel_outlined;
+      default: return Icons.help_outline;
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'ATTENTE': return Colors.orange;
+      case 'CONFIRME': return Colors.blue;
+      case 'ARRIVE': return Colors.teal;
+      case 'TERMINE': return Colors.green;
+      case 'ANNULE': return Colors.redAccent;
+      default: return Colors.grey;
+    }
+  }
+
+  Widget _buildPatientsList() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(12), 
+      itemCount: _patients.length, 
+      itemBuilder: (context, index) {
+        final p = _patients[index];
+        return Card(
+          child: ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.person)),
+            title: Text(p.fullName), 
+            subtitle: Text('CIN: ${p.cin ?? "N/A"} | Tel: ${p.phone ?? "N/A"}'),
+          )
+        );
+      }
+    );
+  }
+}

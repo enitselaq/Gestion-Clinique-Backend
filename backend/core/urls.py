@@ -7,7 +7,7 @@ from .views import (
     UserViewSet, MedecinViewSet, PatientViewSet, 
     RendezVousViewSet, ConsultationViewSet, 
     OrdonnanceViewSet, MedicamentViewSet, PaiementViewSet,
-    CustomAuthToken # Make sure this is imported if you use it in urlpatterns
+    CustomAuthToken, NotificationViewSet # Make sure this is imported if you use it in urlpatterns
 )
 
 # The router automatically generates the URL patterns for us
@@ -23,6 +23,7 @@ router.register(r'consultations', ConsultationViewSet, basename='consultation')
 router.register(r'ordonnances', OrdonnanceViewSet, basename='ordonnance')
 router.register(r'medicaments', MedicamentViewSet, basename='medicament')
 router.register(r'paiements', PaiementViewSet, basename='paiement')
+router.register(r'notifications', NotificationViewSet, basename='notification')
 
 urlpatterns = [
     path('', include(router.urls)),
