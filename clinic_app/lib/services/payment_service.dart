@@ -19,7 +19,10 @@ class PaymentService {
 
   Future<PaiementModel> createPayment(PaiementModel payment) async {
     try {
-      final response = await _dio.post('paiements/', data: payment.toJson());
+      final response = await _dio.post(
+        'paiements/',
+        data: payment.toJson(),
+      );
       return PaiementModel.fromJson(response.data);
     } on DioException {
       rethrow;

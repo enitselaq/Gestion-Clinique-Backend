@@ -97,9 +97,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 ),
                 onPressed: _isProcessing ? null : () async {
                   setState(() => _isProcessing = true);
-                  // Simulate processing
                   await Future.delayed(const Duration(seconds: 2));
-                  if (mounted) Navigator.pop(context, true);
+                  if (!mounted) return;
+                  if (context.mounted) Navigator.pop(context, true);
                 },
                 child: _isProcessing 
                   ? const CircularProgressIndicator(color: Colors.white)

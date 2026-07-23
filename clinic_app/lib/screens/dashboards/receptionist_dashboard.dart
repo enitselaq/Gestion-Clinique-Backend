@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:dio/dio.dart';
 import '../../core/app_theme.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
+import '../../models/paiement_model.dart';
 import '../../models/patient_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../services/appointment_service.dart';
+import '../../services/payment_service.dart';
 import '../../services/user_service.dart';
 import '../notifications_screen.dart';
 
@@ -20,6 +23,7 @@ class ReceptionistDashboard extends StatefulWidget {
 class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
   final AppointmentService _appointmentService = AppointmentService();
   final UserService _userService = UserService();
+  final PaymentService _paymentService = PaymentService();
 
   List<AppointmentModel> _appointments = [];
   List<PatientModel> _patients = [];
@@ -124,6 +128,93 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
     }
   }
 
+  Future<void> _deleteAppointment(AppointmentModel appt) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer le rendez-vous'),
+        content: Text('Voulez-vous vraiment supprimer le rendez-vous de ${appt.patientName ?? "ce patient"} ?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      try {
+        await _appointmentService.deleteAppointment(appt.id!);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Rendez-vous supprimé.')),
+        );
+        _fetchData();
+      } catch (e) {
+        debugPrint('Error deleting appointment: $e');
+      }
+    }
+  }
+
+  Future<void> _showPaymentDialog(AppointmentModel appt) async {
+    final amountController = TextEditingController(text: '200');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enregistrer un paiement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Patient: ${appt.patientName ?? "N/A"}'),
+            const SizedBox(height: 8),
+            Text('Date RDV: ${appt.dateRdv.toString().substring(0, 10)}'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Montant (MAD)',
+                prefixIcon: Icon(Icons.money),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () {
+              final amount = double.tryParse(amountController.text);
+              if (amount != null && amount > 0) {
+                Navigator.pop(context, true);
+              }
+            },
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      try {
+        final amount = double.tryParse(amountController.text) ?? 200;
+        await _paymentService.createPayment(
+          PaiementModel(rdvId: appt.id!, montant: amount),
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Paiement enregistré avec succès.'), backgroundColor: AppTheme.primaryTeal),
+        );
+      } catch (e) {
+        debugPrint('Error recording payment: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erreur lors de l\'enregistrement du paiement.'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final localeProvider = Provider.of<LocaleProvider>(context);
@@ -174,6 +265,7 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
                         _buildMenuCard('Patients', Icons.people, Colors.indigo, _patients.length, () => _showSection('Patients', _buildPatientsList())),
                         _buildMenuCard('Médecins', Icons.person_search, Colors.teal, _doctors.length, () => _showSection('Médecins', _buildDoctorsList())),
                         _buildMenuCard('Arrivées', Icons.login_rounded, Colors.orange, _appointments.where((a) => a.statut == 'CONFIRME').length, () => _showSection('En Attente', _buildAppointmentsList())),
+                        _buildMenuCard('Paiements', Icons.account_balance_wallet_rounded, Colors.green, 0, () => _showSection('Paiements', _buildPaymentsList())),
                       ],
                     ),
                     const SizedBox(height: 20),
@@ -337,7 +429,20 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
                         if (appt.statut == 'ARRIVE')
                           const Chip(label: Text('En Salle d\'Attente'), backgroundColor: Colors.orangeAccent, labelStyle: TextStyle(color: Colors.white)),
                         if (appt.statut == 'TERMINE')
-                          const Chip(label: Text('Consultation Terminée'), backgroundColor: Colors.green, labelStyle: TextStyle(color: Colors.white)),
+                          ElevatedButton.icon(
+                            onPressed: () => _showPaymentDialog(appt),
+                            icon: const Icon(Icons.payment),
+                            label: const Text('Paiement'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                          ),
+                        if (appt.statut == 'ANNULE')
+                          const Chip(label: Text('Annulé'), backgroundColor: Colors.redAccent, labelStyle: TextStyle(color: Colors.white)),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: () => _deleteAppointment(appt),
+                          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                          tooltip: 'Supprimer',
+                        ),
                       ],
                     ),
                   ],
@@ -350,12 +455,40 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
     );
   }
 
+  Widget _buildPaymentsList() {
+    final completed = _appointments.where((a) => a.statut == 'TERMINE').toList();
+    if (completed.isEmpty) {
+      return const Center(child: Text('Aucune consultation terminée à facturer.'));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: completed.length,
+      itemBuilder: (context, index) {
+        final appt = completed[index];
+        return Card(
+          child: ListTile(
+            leading: const CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.payment, color: Colors.white)),
+            title: Text(appt.patientName ?? 'Patient'),
+            subtitle: Text('RDV: ${appt.dateRdv.toString().substring(0, 10)}'),
+            trailing: ElevatedButton.icon(
+              onPressed: () => _showPaymentDialog(appt),
+              icon: const Icon(Icons.add_card),
+              label: const Text('Enregistrer'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   IconData _getStatusIcon(String status) {
     switch (status) {
       case 'ATTENTE': return Icons.hourglass_empty;
       case 'CONFIRME': return Icons.event_available;
       case 'ARRIVE': return Icons.airline_seat_recline_normal;
       case 'TERMINE': return Icons.task_alt;
+      case 'ANNULE': return Icons.cancel_outlined;
       default: return Icons.help_outline;
     }
   }
@@ -366,6 +499,7 @@ class _ReceptionistDashboardState extends State<ReceptionistDashboard> {
       case 'CONFIRME': return Colors.blue;
       case 'ARRIVE': return Colors.teal;
       case 'TERMINE': return Colors.green;
+      case 'ANNULE': return Colors.redAccent;
       default: return Colors.grey;
     }
   }

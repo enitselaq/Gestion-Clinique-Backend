@@ -33,7 +33,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     try {
       await _service.markRead(n.id);
       setState(() { _notifs = _notifs.map((x) => x.id == n.id ? NotificationModel(id: x.id, userId: x.userId, message: x.message, createdAt: x.createdAt, read: true) : x).toList(); });
-    } catch (e) {}
+    } catch (_) {}
   }
 
   @override
@@ -43,7 +43,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       body: _loading ? const Center(child: CircularProgressIndicator()) : ListView.separated(
         padding: const EdgeInsets.all(12),
         itemCount: _notifs.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
           final n = _notifs[index];
           return Card(

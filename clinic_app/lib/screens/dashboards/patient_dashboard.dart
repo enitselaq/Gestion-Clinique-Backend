@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:dio/dio.dart';
 import 'package:intl/intl.dart';
 import '../../core/app_theme.dart';
 import '../../models/appointment_model.dart';
@@ -234,7 +233,7 @@ class _PatientDashboardState extends State<PatientDashboard> {
       decoration: BoxDecoration(
         gradient: const LinearGradient(colors: [AppTheme.primaryTeal, AppTheme.deepTeal]),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: AppTheme.primaryTeal.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: AppTheme.primaryTeal.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Row(
         children: [
@@ -245,7 +244,7 @@ class _PatientDashboardState extends State<PatientDashboard> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(activeAppt.statut == 'CONFIRME' ? 'RDV Confirmé' : 'Demande en cours', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                Text('Le ${_formatDate(activeAppt.dateRdv)} ${activeAppt.medecinName != null ? "avec Dr. ${activeAppt.medecinName}" : ""}', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                Text('Le ${_formatDate(activeAppt.dateRdv)} ${activeAppt.medecinName != null ? "avec Dr. ${activeAppt.medecinName}" : ""}', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13)),
               ],
             ),
           ),
@@ -260,12 +259,12 @@ class _PatientDashboardState extends State<PatientDashboard> {
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.withOpacity(0.1))),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.withValues(alpha: 0.1))),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color, size: 28)),
+            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color, size: 28)),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)), Text('$count éléments', style: TextStyle(color: AppTheme.mutedSlate, fontSize: 12))])
           ],
         ),
@@ -305,6 +304,12 @@ class _PatientDashboardState extends State<PatientDashboard> {
     final pres = _prescriptions.where((p) => p.consultationId == c.id).firstOrNull;
     final path = await PdfService.exportFullDiagnostic(consultation: c, prescription: pres, patientName: c.patientName ?? "Patient", doctorName: c.medecinName ?? "Médecin");
     if (path != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Rapport téléchargé : $path')));
+  }
+
+  Future<void> _downloadReceipt(PaiementModel p) async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final path = await PdfService.exportReceipt(payment: p, patientName: authProvider.user?.name ?? "Patient");
+    if (path != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Reçu téléchargé : $path')));
   }
 
   Widget _buildPrescriptionsList() {
@@ -350,13 +355,13 @@ class _PatientDashboardState extends State<PatientDashboard> {
         if (pending.isNotEmpty) ...[
           const Text('À régler', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 10),
-          ...pending.map((a) => Card(color: Colors.red.shade50, child: ListTile(title: const Text('Consultation médicale'), subtitle: Text('Dr. ${a.medecinName ?? "Généraliste"} - 200 MAD'), trailing: ElevatedButton(onPressed: () => _payOnline(a), child: const Text('Payer'), style: ElevatedButton.styleFrom(minimumSize: const Size(80, 40)))))),
+          ...pending.map((a) => Card(color: Colors.red.shade50, child: ListTile(title: const Text('Consultation médicale'), subtitle: Text('Dr. ${a.medecinName ?? "Généraliste"} - 200 MAD'), trailing: ElevatedButton(onPressed: () => _payOnline(a), style: ElevatedButton.styleFrom(minimumSize: const Size(80, 40)), child: const Text('Payer'))))),
           const SizedBox(height: 20),
         ],
         const Text('Historique', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         const SizedBox(height: 10),
         if (_payments.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun historique de paiement.', style: TextStyle(color: Colors.grey, fontSize: 13))),
-        ..._payments.map((p) => Card(child: ListTile(leading: const Icon(Icons.check_circle, color: Colors.green), title: Text('${p.montant} MAD'), subtitle: Text('Payé le ${_formatDate(p.datePaiement)}')))),
+        ..._payments.map((p) => Card(child: Column(children: [ListTile(leading: const Icon(Icons.check_circle, color: Colors.green), title: Text('${p.montant} MAD'), subtitle: Text('Payé le ${_formatDate(p.datePaiement)}')), Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [TextButton.icon(onPressed: () => _downloadReceipt(p), icon: const Icon(Icons.download), label: const Text('Télécharger Reçu'))]))]))),
       ],
     );
   }

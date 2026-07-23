@@ -21,6 +21,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   int _patientCount = 0;
   int _doctorCount = 0;
   List<AppointmentModel> _pendingRequests = [];
+  List<dynamic> _allUsers = [];
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -36,16 +38,39 @@ class _AdminDashboardState extends State<AdminDashboard> {
         _userService.getPatients(),
         _userService.getMedecins(),
         _appointmentService.getAppointments(),
+        _userService.getAllUsers(),
       ]);
       
       if (!mounted) return;
       setState(() {
-        _patientCount = (results[0] as List).length;
-        _doctorCount = (results[1] as List).length;
+        _patientCount = results[0].length;
+        _doctorCount = results[1].length;
         _pendingRequests = (results[2] as List<AppointmentModel>)
             .where((a) => a.statut == 'ATTENTE').toList();
+        _allUsers = results[3];
         _isLoading = false;
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _searchUsers(String query) async {
+    setState(() {
+      _searchQuery = query;
+      _isLoading = true;
+    });
+    try {
+      if (query.isEmpty) {
+        final users = await _userService.getAllUsers();
+        if (!mounted) return;
+        setState(() { _allUsers = users; _isLoading = false; });
+      } else {
+        final response = await _userService.searchUsers(query);
+        if (!mounted) return;
+        setState(() { _allUsers = response; _isLoading = false; });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -105,13 +130,73 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       )).toList(),
                     ),
                 const SizedBox(height: 32),
-                const Text('Gestion', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Gestion des Utilisateurs', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('${_allUsers.length} comptes', style: TextStyle(color: AppTheme.mutedSlate, fontSize: 14)),
+                  ],
+                ),
                 const SizedBox(height: 12),
-                _buildActionCard('Gérer le Personnel', Icons.badge_outlined),
-                _buildActionCard('Paramètres de la Clinique', Icons.settings_applications_outlined),
+                TextField(
+                  onChanged: _searchUsers,
+                  decoration: InputDecoration(
+                    hintText: 'Rechercher par nom, rôle, email ou CIN...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildUsersList(),
               ],
             ),
           ),
+    );
+  }
+
+  Widget _buildUsersList() {
+    final filtered = _searchQuery.isEmpty
+        ? _allUsers
+        : _allUsers.where((u) {
+            final name = '${u['first_name'] ?? ''} ${u['last_name'] ?? ''}'.toLowerCase();
+            final role = (u['role'] ?? '').toString().toLowerCase();
+            final email = (u['email'] ?? '').toString().toLowerCase();
+            final q = _searchQuery.toLowerCase();
+            return name.contains(q) || role.contains(q) || email.contains(q);
+          }).toList();
+
+    if (filtered.isEmpty) {
+      return const Card(child: ListTile(title: Text('Aucun utilisateur trouvé', style: TextStyle(color: Colors.grey))));
+    }
+
+    return Column(
+      children: filtered.take(20).map((u) {
+        final role = u['role'] ?? '';
+        final roleColor = role == 'ADMIN' ? Colors.red
+            : role == 'MEDECIN' ? AppTheme.primaryTeal
+            : role == 'REC' ? Colors.indigo
+            : Colors.blue;
+        final roleLabel = role == 'ADMIN' ? 'Administrateur'
+            : role == 'MEDECIN' ? 'Médecin'
+            : role == 'REC' ? 'Réceptionniste'
+            : 'Patient';
+        return Card(
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: roleColor.withValues(alpha: 0.1),
+              child: Icon(Icons.person, color: roleColor),
+            ),
+            title: Text('${u['first_name'] ?? ''} ${u['last_name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('$roleLabel • ${u['email'] ?? ''}'),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: roleColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+              child: Text(roleLabel, style: TextStyle(fontSize: 11, color: roleColor, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -136,17 +221,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ],
           )
         ],
-      ),
-    );
-  }
-
-  Widget _buildActionCard(String title, IconData icon) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Icon(icon, color: AppTheme.primaryTeal),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 14),
       ),
     );
   }

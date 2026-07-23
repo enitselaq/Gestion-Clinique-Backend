@@ -60,6 +60,7 @@ class RendezVous(models.Model):
     STATUS_CHOICES = (
         ('ATTENTE', 'En attente'),
         ('CONFIRME', 'Confirmé'),
+        ('ARRIVE', 'Arrivé'),
         ('ANNULE', 'Annulé'),
         ('TERMINE', 'Terminé'),
     )

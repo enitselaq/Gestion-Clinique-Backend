@@ -1,15 +1,25 @@
 import 'package:dio/dio.dart';
 import '../models/notification_model.dart';
+import 'api_client.dart';
 
 class NotificationService {
-  final Dio _dio = Dio();
+  final ApiClient _apiClient = ApiClient();
+  Dio get _dio => _apiClient.dio;
 
   Future<List<NotificationModel>> getNotifications() async {
-    final resp = await _dio.get('notifications/');
-    return (resp.data as List).map((e) => NotificationModel.fromJson(e)).toList();
+    try {
+      final resp = await _dio.get('notifications/');
+      return (resp.data as List).map((e) => NotificationModel.fromJson(e)).toList();
+    } on DioException {
+      rethrow;
+    }
   }
 
   Future<void> markRead(int id) async {
-    await _dio.post('notifications/$id/mark-read/');
+    try {
+      await _dio.post('notifications/$id/mark-read/');
+    } on DioException {
+      rethrow;
+    }
   }
 }

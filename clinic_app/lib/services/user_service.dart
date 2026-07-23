@@ -77,6 +77,15 @@ class UserService {
     return response.data;
   }
 
+  Future<List<dynamic>> searchUsers(String query) async {
+    try {
+      final response = await _dio.get('users/', queryParameters: {'search': query});
+      return response.data;
+    } on DioException {
+      return [];
+    }
+  }
+
   Future<bool> deleteUser(int id) async {
     try {
       final response = await _dio.delete('users/$id/');

@@ -17,7 +17,6 @@ dependencies:
   flutter_secure_storage: ^9.0.0
   provider: ^6.1.1
   web: ^1.1.1
-  flutter_native_splash: ^2.4.8
   cupertino_icons: ^1.0.8
   flutter_gen: ^5.12.0
   pdf: ^3.12.0
@@ -38,3 +37,5 @@ flutter:
     - assets/argana_title.png
     - assets/argana_c_logo.png
     - assets/pdf_logo_argana.png
+    - assets/splash_screee_argana.png
+    - assets/argana_icon.png

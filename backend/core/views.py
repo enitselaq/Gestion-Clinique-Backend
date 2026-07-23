@@ -61,9 +61,24 @@ class ForgotPasswordResetView(generics.GenericAPIView):
 
 # --- 1. Admin User Management ---
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = Utilisateur.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAdmin]
+
+    def get_queryset(self):
+        qs = Utilisateur.objects.all()
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(role__icontains=search)
+            ) | qs.filter(
+                Q(patient__cin__icontains=search)
+            )
+        return qs.distinct()
 
 # --- 2. Private Access (Medical Data) ---
 class MedecinViewSet(viewsets.ModelViewSet):
@@ -164,12 +179,27 @@ class RendezVousViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(rdv).data)
 
     def partial_update(self, request, *args, **kwargs):
-        # Doctors are allowed to update some fields (e.g., statut)
-        # but should not be able to change the appointment schedule.
         user = request.user
         if user.role == 'MEDECIN' and 'date_rdv' in request.data:
             return Response({'date_rdv': ['Doctors cannot change appointment schedule.']}, status=status.HTTP_400_BAD_REQUEST)
-        return super().partial_update(request, *args, **kwargs)
+
+        response = super().partial_update(request, *args, **kwargs)
+
+        if response.status_code == 200 and 'statut' in request.data:
+            new_status = request.data['statut']
+            rdv = self.get_object()
+            if new_status == 'ANNULE':
+                Notification.objects.create(
+                    user=rdv.patient.user,
+                    message=f"Votre rendez-vous du {rdv.date_rdv} a été annulé."
+                )
+                if rdv.medecin:
+                    Notification.objects.create(
+                        user=rdv.medecin.user,
+                        message=f"Le rendez-vous du {rdv.date_rdv} avec {rdv.patient.user.get_full_name()} a été annulé."
+                    )
+
+        return response
 
 class ConsultationViewSet(viewsets.ModelViewSet):
     serializer_class = ConsultationSerializer
@@ -227,7 +257,7 @@ class OrdonnanceViewSet(viewsets.ModelViewSet):
         # Ensure doctors can only create ordonnances for their own consultations
         consultation_id = request.data.get('consultation')
         try:
-            consultation = Consultation.objects.select_related('medecin__user').get(pk=consultation_id)
+            consultation = Consultation.objects.select_related('medecin__user', 'rdv__patient__user').get(pk=consultation_id)
         except Exception:
             return Response({'consultation': ['Invalid consultation.']}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -235,7 +265,15 @@ class OrdonnanceViewSet(viewsets.ModelViewSet):
         if user.role == 'MEDECIN' and consultation.medecin.user != user:
             return Response({'consultation': ['You may only create prescriptions for your own consultations.']}, status=status.HTTP_400_BAD_REQUEST)
 
-        return super().create(request, *args, **kwargs)
+        response = super().create(request, *args, **kwargs)
+
+        if response.status_code == 201:
+            Notification.objects.create(
+                user=consultation.rdv.patient.user,
+                message=f"Une ordonnance a été générée pour votre consultation du {consultation.date_consult.strftime('%d/%m/%Y')}."
+            )
+
+        return response
 
 class MedicamentViewSet(viewsets.ModelViewSet):
     queryset = Medicament.objects.select_related(
