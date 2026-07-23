@@ -8,7 +8,7 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-c%6jtitk(c#&9#e2408
 
 DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
 
-ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if host.strip()]
+ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,enitselaq.pythonanywhere.com').split(',') if host.strip()]
 
 # Application definition
 INSTALLED_APPS = [
